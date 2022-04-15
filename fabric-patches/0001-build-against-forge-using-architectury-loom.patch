@@ -1,0 +1,67 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CursedFlames <18627001+CursedFlames@users.noreply.github.com>
+Date: Fri, 15 Apr 2022 15:40:01 +1200
+Subject: [PATCH] build against forge using architectury-loom
+
+
+diff --git a/build.gradle b/build.gradle
+index 23f51862fc2b58ed64c9ea8d3c694a58a070feea..6746aaf49c6f859de96a46ec05deaac7db89cd30 100644
+--- a/build.gradle
++++ b/build.gradle
+@@ -9,7 +9,7 @@ plugins {
+ 	id "eclipse"
+ 	id "idea"
+ 	id "maven-publish"
+-	id "fabric-loom" version "0.11.32" apply false
++	id "dev.architectury.loom" version "0.11.0-SNAPSHOT" apply false
+ 	id "org.cadixdev.licenser" version "0.6.1"
+ 	id "org.ajoberstar.grgit" version "3.1.0"
+ 	id "com.matthewprenger.cursegradle" version "1.4.0"
+@@ -92,7 +92,7 @@ allprojects {
+ 	apply plugin: "java-library"
+ 	apply plugin: "checkstyle"
+ 	apply plugin: "maven-publish"
+-	apply plugin: "fabric-loom"
++	apply plugin: "dev.architectury.loom"
+ 	apply plugin: "org.cadixdev.licenser"
+ 	apply plugin: "me.modmuss50.remotesign"
+ 
+@@ -132,6 +132,7 @@ allprojects {
+ 		minecraft "com.mojang:minecraft:$rootProject.minecraft_version"
+ 		mappings "net.fabricmc:yarn:${rootProject.minecraft_version}${project.yarn_version}:v2"
+ 		modApi "net.fabricmc:fabric-loader:${project.loader_version}"
++		forge "net.minecraftforge:forge:${rootProject.minecraft_version}-${rootProject.forge_version}"
+ 	}
+ 
+ 	loom {
+diff --git a/gradle.properties b/gradle.properties
+index 3ce04ecdd6e1e2639c11c0ea0247d9c1af854f61..5cc0fd12ce45a54bff944971d7a1aaf576651282 100644
+--- a/gradle.properties
++++ b/gradle.properties
+@@ -7,6 +7,9 @@ loader_version=0.13.2
+ 
+ prerelease=false
+ 
++loom.platform=forge
++forge_version=40.0.32
++
+ # Do not manually update, use the bumpversions task:
+ fabric-api-base-version=0.4.4
+ fabric-api-lookup-api-v1-version=1.6.0
+diff --git a/settings.gradle b/settings.gradle
+index 813b02b61f80e478594a01b9cf33be9606249a89..548d7173e30b384b12008d942b82fcc60cbc92a2 100644
+--- a/settings.gradle
++++ b/settings.gradle
+@@ -5,6 +5,12 @@ pluginManagement {
+ 			name = 'Fabric'
+ 			url = 'https://maven.fabricmc.net/'
+ 		}
++		maven {
++			url "https://maven.architectury.dev/"
++		}
++		maven {
++			url "https://files.minecraftforge.net/maven/"
++		}
+ 		mavenLocal()
+ 	}
+ }

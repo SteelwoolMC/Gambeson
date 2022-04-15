@@ -1,0 +1,32 @@
+buildscript {
+	repositories {
+		mavenLocal()
+		mavenCentral()
+		maven { url = 'https://files.minecraftforge.net/maven/'}
+	}
+	dependencies {
+		classpath 'net.minecraftforge:gitpatcher:0.10.+'
+	}
+}
+
+plugins {
+//    id 'java'
+}
+
+apply plugin: 'net.minecraftforge.gitpatcher'
+
+patches {
+	// The submodule path you just created
+	submodule = 'fabric'
+	// The target folder for the patched repositories
+	target = file('gambeson')
+	// The folder where the patches are saved
+	patches = file('fabric-patches')
+}
+
+group 'io.github.steelwoolmc'
+version '0.0.1'
+
+tasks.register("build") {
+	dependsOn gradle.includedBuild("gambeson").task(":build")
+}
