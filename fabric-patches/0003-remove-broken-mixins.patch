@@ -1,0 +1,161 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CursedFlames <18627001+CursedFlames@users.noreply.github.com>
+Date: Sun, 17 Apr 2022 23:47:36 +1200
+Subject: [PATCH] remove broken mixins
+
+Comment out some mixins that are broken due to differences between FabricMC/Mixin and upstream SpongePowered/Mixin
+- specifically due to SpongePowered/Mixin#318 and SpongePowered/Mixin#560
+This patch will need to be fixed properly before release.
+
+diff --git a/fabric-content-registries-v0/src/main/java/net/fabricmc/fabric/mixin/content/registry/OxidizableMixin.java b/fabric-content-registries-v0/src/main/java/net/fabricmc/fabric/mixin/content/registry/OxidizableMixin.java
+index 91acfb5091d262e351f88767606d473f148cb460..1a5f5371aea9f6a2e1ec9cee07c5dfcb7453dfb4 100644
+--- a/fabric-content-registries-v0/src/main/java/net/fabricmc/fabric/mixin/content/registry/OxidizableMixin.java
++++ b/fabric-content-registries-v0/src/main/java/net/fabricmc/fabric/mixin/content/registry/OxidizableMixin.java
+@@ -28,9 +28,12 @@ import net.minecraft.block.Oxidizable;
+ 
+ @Mixin(Oxidizable.class)
+ public interface OxidizableMixin {
++	// FIXME(gambeson) interface @Injects work with fabric mixin but not forge mixin
++	/*
+ 	@Dynamic("method_34740: Synthetic lambda body for Suppliers.memoize in initialization of OXIDATION_LEVEL_INCREASES")
+ 	@Inject(method = "method_34740", at = @At("RETURN"), cancellable = true)
+ 	private static void createOxidationLevelIncreasesMap(CallbackInfoReturnable<BiMap> cir) {
+ 		cir.setReturnValue(HashBiMap.create(cir.getReturnValue()));
+ 	}
++	*/
+ }
+diff --git a/fabric-events-interaction-v0/src/main/java/net/fabricmc/fabric/mixin/event/interaction/MixinServerPlayNetworkHandler.java b/fabric-events-interaction-v0/src/main/java/net/fabricmc/fabric/mixin/event/interaction/MixinServerPlayNetworkHandler.java
+index 6b408404c9643bc94701dbdc815e8dc6f5a46aec..5d53644a217dfc2a0035a40af674ce77dce5cda7 100644
+--- a/fabric-events-interaction-v0/src/main/java/net/fabricmc/fabric/mixin/event/interaction/MixinServerPlayNetworkHandler.java
++++ b/fabric-events-interaction-v0/src/main/java/net/fabricmc/fabric/mixin/event/interaction/MixinServerPlayNetworkHandler.java
+@@ -36,6 +36,8 @@ import net.fabricmc.fabric.api.event.player.UseEntityCallback;
+ 
+ @Mixin(targets = "net/minecraft/server/network/ServerPlayNetworkHandler$1")
+ public abstract class MixinServerPlayNetworkHandler implements PlayerInteractEntityC2SPacket.Handler {
++	// FIXME(gambeson) commented out because of https://github.com/SpongePowered/Mixin/issues/560
++	/*
+ 	@Shadow
+ 	public ServerPlayNetworkHandler field_28963;
+ 
+@@ -54,4 +56,5 @@ public abstract class MixinServerPlayNetworkHandler implements PlayerInteractEnt
+ 			info.cancel();
+ 		}
+ 	}
++	*/
+ }
+diff --git a/fabric-game-rule-api-v1/src/main/java/net/fabricmc/fabric/mixin/gamerule/GameRuleCommandVisitorMixin.java b/fabric-game-rule-api-v1/src/main/java/net/fabricmc/fabric/mixin/gamerule/GameRuleCommandVisitorMixin.java
+index 1f99be0e44d4418fc67da382cc44f372c9d66a73..b653d6557d02c27fccad3f0b1f3f04815f82bd2f 100644
+--- a/fabric-game-rule-api-v1/src/main/java/net/fabricmc/fabric/mixin/gamerule/GameRuleCommandVisitorMixin.java
++++ b/fabric-game-rule-api-v1/src/main/java/net/fabricmc/fabric/mixin/gamerule/GameRuleCommandVisitorMixin.java
+@@ -31,6 +31,8 @@ import net.fabricmc.fabric.impl.gamerule.EnumRuleType;
+ 
+ @Mixin(targets = "net/minecraft/server/command/GameRuleCommand$1")
+ public abstract class GameRuleCommandVisitorMixin {
++	// FIXME(gambeson) commented out because of https://github.com/SpongePowered/Mixin/issues/560
++	/*
+ 	@Shadow
+ 	private LiteralArgumentBuilder<ServerCommandSource> field_19419;
+ 
+@@ -43,4 +45,5 @@ public abstract class GameRuleCommandVisitorMixin {
+ 			ci.cancel();
+ 		}
+ 	}
++	*/
+ }
+diff --git a/fabric-game-rule-api-v1/src/main/java/net/fabricmc/fabric/mixin/gamerule/client/RuleListWidgetVisitorMixin.java b/fabric-game-rule-api-v1/src/main/java/net/fabricmc/fabric/mixin/gamerule/client/RuleListWidgetVisitorMixin.java
+index b8af8dedaf65539a452dbc751bfdf6777b2fb989..e8b2e92e9edfe9e1bc6e91d1a79ce5d98f258ab2 100644
+--- a/fabric-game-rule-api-v1/src/main/java/net/fabricmc/fabric/mixin/gamerule/client/RuleListWidgetVisitorMixin.java
++++ b/fabric-game-rule-api-v1/src/main/java/net/fabricmc/fabric/mixin/gamerule/client/RuleListWidgetVisitorMixin.java
+@@ -39,6 +39,8 @@ import net.fabricmc.fabric.impl.gamerule.widget.EnumRuleWidget;
+ @Environment(EnvType.CLIENT)
+ @Mixin(targets = "net/minecraft/client/gui/screen/world/EditGameRulesScreen$RuleListWidget$1")
+ public abstract class RuleListWidgetVisitorMixin implements GameRules.Visitor, FabricGameRuleVisitor {
++	// FIXME(gambeson) commented out because of https://github.com/SpongePowered/Mixin/issues/560
++	/*
+ 	@Final
+ 	@Shadow
+ 	private EditGameRulesScreen field_24314;
+@@ -58,6 +60,7 @@ public abstract class RuleListWidgetVisitorMixin implements GameRules.Visitor, F
+ 			return new EnumRuleWidget<>(this.field_24314, name, description, ruleName, rule, key.getTranslationKey());
+ 		});
+ 	}
++	*/
+ 
+ 	/**
+ 	 * @reason We need to display an enum rule's default value as translated.
+diff --git a/fabric-registry-sync-v0/src/main/java/net/fabricmc/fabric/mixin/registry/sync/MixinDynamicRegistryManager.java b/fabric-registry-sync-v0/src/main/java/net/fabricmc/fabric/mixin/registry/sync/MixinDynamicRegistryManager.java
+index bdc87496dac82ed64350c79ed618506cf4fcbc9d..44b8a61b5f73ba7c3566744f155159daa18c6b89 100644
+--- a/fabric-registry-sync-v0/src/main/java/net/fabricmc/fabric/mixin/registry/sync/MixinDynamicRegistryManager.java
++++ b/fabric-registry-sync-v0/src/main/java/net/fabricmc/fabric/mixin/registry/sync/MixinDynamicRegistryManager.java
+@@ -16,7 +16,17 @@
+ 
+ package net.fabricmc.fabric.mixin.registry.sync;
+ 
++import com.mojang.serialization.JsonOps;
++
++import net.minecraft.util.dynamic.EntryLoader;
++import net.minecraft.util.dynamic.RegistryOps;
++import net.minecraft.util.registry.Registry;
++import net.minecraft.util.registry.RegistryKey;
++import net.minecraft.world.dimension.DimensionType;
++
+ import org.spongepowered.asm.mixin.Mixin;
++import org.spongepowered.asm.mixin.Overwrite;
++import org.spongepowered.asm.mixin.Shadow;
+ import org.spongepowered.asm.mixin.injection.At;
+ import org.spongepowered.asm.mixin.injection.Inject;
+ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+@@ -27,19 +37,53 @@ import net.minecraft.util.registry.DynamicRegistryManager;
+ import net.fabricmc.fabric.api.event.registry.DynamicRegistrySetupCallback;
+ import net.fabricmc.fabric.impl.registry.sync.DynamicRegistrySync;
+ 
++import java.util.Map;
++
+ @Mixin(DynamicRegistryManager.class)
+ public interface MixinDynamicRegistryManager {
++	/*
+ 	@Inject(method = "createAndLoad", at = @At(value = "INVOKE", target = "Lnet/minecraft/util/dynamic/EntryLoader$Impl;<init>()V"), locals = LocalCapture.CAPTURE_FAILHARD)
+ 	private static void onCreateImpl(CallbackInfoReturnable<DynamicRegistryManager.Mutable> cir, DynamicRegistryManager.Mutable registryManager) {
+ 		DynamicRegistrySetupCallback.EVENT.invoker().onRegistrySetup(registryManager);
+ 	}
++	*/
++
++	@Shadow
++	private static DynamicRegistryManager.Mutable createMutableRegistryManager() { throw new IllegalStateException(); }
++
++	@Shadow
++	private static <E> void addEntriesToLoad(EntryLoader.Impl entryLoader, DynamicRegistryManager.Info<E> info) { throw new IllegalStateException(); }
++
++	// FIXME(gambeson) @Overwrite used because interface @Injects don't work
++	@Overwrite
++	static DynamicRegistryManager.Mutable createAndLoad() {
++		DynamicRegistryManager.Mutable registryaccess$writable = createMutableRegistryManager();
++		DynamicRegistrySetupCallback.EVENT.invoker().onRegistrySetup(registryaccess$writable);
++		EntryLoader.Impl registryresourceaccess$inmemorystorage = new EntryLoader.Impl();
++		for (Map.Entry<RegistryKey<? extends Registry<?>>, DynamicRegistryManager.Info<?>> entry : DynamicRegistryManager.INFOS.entrySet()) {
++			if (entry.getKey().equals(Registry.DIMENSION_TYPE_KEY)) continue;
++			addEntriesToLoad(registryresourceaccess$inmemorystorage, entry.getValue());
++		}
++		RegistryOps.ofLoaded(JsonOps.INSTANCE, registryaccess$writable, registryresourceaccess$inmemorystorage);
++		return DimensionType.addRegistryDefaults(registryaccess$writable);
++	}
+ 
+ 	/**
+ 	 * Ensures that any registrations made into {@link net.minecraft.util.registry.BuiltinRegistries} after
+ 	 * {@link DynamicRegistryManager} has been class-loaded are still propagated.
+ 	 */
++	/*
+ 	@Inject(method = "method_40327", at = @At(value = "RETURN"))
+ 	private static void setupBuiltInSync(CallbackInfoReturnable<DynamicRegistryManager.Immutable> cir) {
+ 		DynamicRegistrySync.setupSync(cir.getReturnValue());
+ 	}
++	*/
++
++	// FIXME(gambeson) @Overwrite used because interface @Injects don't work
++	@Overwrite
++	static DynamicRegistryManager.Immutable lambda$static$1() {
++		var immutable = DynamicRegistryManager.createAndLoad().toImmutable();
++		DynamicRegistrySync.setupSync(immutable);
++		return immutable;
++	}
+ }

@@ -3,45 +3,140 @@ From: CursedFlames <18627001+CursedFlames@users.noreply.github.com>
 Date: Fri, 15 Apr 2022 15:40:01 +1200
 Subject: [PATCH] build against forge using architectury-loom
 
+We hack around architectury-loom's remapping since it breaks the build; some other things are also disabled for convenience.
 
 diff --git a/build.gradle b/build.gradle
-index 23f51862fc2b58ed64c9ea8d3c694a58a070feea..6746aaf49c6f859de96a46ec05deaac7db89cd30 100644
+index 23f51862fc2b58ed64c9ea8d3c694a58a070feea..cdf57d7adfbf2a1179d6e407f9cc33794180c06e 100644
 --- a/build.gradle
 +++ b/build.gradle
-@@ -9,7 +9,7 @@ plugins {
+@@ -9,7 +9,8 @@ plugins {
  	id "eclipse"
  	id "idea"
  	id "maven-publish"
 -	id "fabric-loom" version "0.11.32" apply false
++	// gambeson: use architectury-loom instead of fabric-loom so that we can compile against forge
 +	id "dev.architectury.loom" version "0.11.0-SNAPSHOT" apply false
  	id "org.cadixdev.licenser" version "0.6.1"
  	id "org.ajoberstar.grgit" version "3.1.0"
  	id "com.matthewprenger.cursegradle" version "1.4.0"
-@@ -92,7 +92,7 @@ allprojects {
+@@ -92,7 +93,8 @@ allprojects {
  	apply plugin: "java-library"
  	apply plugin: "checkstyle"
  	apply plugin: "maven-publish"
 -	apply plugin: "fabric-loom"
++	// gambeson: use architectury-loom instead of fabric-loom so that we can compile against forge
 +	apply plugin: "dev.architectury.loom"
  	apply plugin: "org.cadixdev.licenser"
  	apply plugin: "me.modmuss50.remotesign"
  
-@@ -132,6 +132,7 @@ allprojects {
+@@ -132,6 +134,8 @@ allprojects {
  		minecraft "com.mojang:minecraft:$rootProject.minecraft_version"
  		mappings "net.fabricmc:yarn:${rootProject.minecraft_version}${project.yarn_version}:v2"
  		modApi "net.fabricmc:fabric-loader:${project.loader_version}"
++		// gambeson: add forge dependency
 +		forge "net.minecraftforge:forge:${rootProject.minecraft_version}-${rootProject.forge_version}"
  	}
  
  	loom {
+@@ -189,6 +193,31 @@ allprojects {
+ 	}
+ }
+ 
++// gambeson: hack to avoid using architectury's jar remapping,
++// as it creates a separate remapper for each subproject and uses >8 GB of RAM during remapping
++allprojects {
++	// Don't do anything for either of these tasks
++	project.tasks.prepareRemapJar.configure {
++		actions.clear()
++	}
++	project.tasks.remapJar.configure {
++		actions.clear()
++	}
++	// TODO(gambeson) add copy tasks for these too
++	project.tasks.remapSourcesJar.configure {
++		actions.clear()
++	}
++	// Copy the unmapped jar to the output directory instead
++	task copyUnmappedJar(type: Sync) {
++		from(project.tasks.remapJar.inputFile) {
++			rename { filename -> return project.tasks.remapJar.outputs.files.singleFile.name }
++		}
++		into(project.tasks.remapJar.outputs.files.singleFile.parentFile)
++	}
++	project.tasks.remapJar.dependsOn(copyUnmappedJar)
++}
++// gambeson end
++
+ // Apply auxiliary buildscripts to submodules
+ // This must be done after all plugins are applied to subprojects
+ apply from: "gradle/module-validation.gradle"
+@@ -251,7 +280,8 @@ loom {
+ 		}
+ 	}
+ }
+-test.dependsOn runGametest
++// TODO(gambeson) re-enable tests
++//test.dependsOn runGametest
+ 
+ subprojects {
+ 	dependencies {
+@@ -305,6 +335,12 @@ task remapMavenJar(type: net.fabricmc.loom.task.RemapJarTask, dependsOn: jar) {
+ }
+ build.dependsOn remapMavenJar
+ 
++// gambeson: hack to avoid using architectury's jar remapping; same as above
++remapMavenJar.configure {
++	actions.clear()
++}
++// gambeson end
++
+ if (signingEnabled) {
+ 	remoteSign {
+ 		sign remapMavenJar
+@@ -377,11 +413,24 @@ dependencies {
+ 	afterEvaluate {
+ 		subprojects.each {
+ 			api project(path: ":${it.name}", configuration: "namedElements")
++			// gambeson: disable test-related stuff for now
++//			testmodImplementation project("${it.name}:").sourceSets.testmod.output
++		}
++	}
++}
++
++// gambeson: include jars here instead of remapJar, since remapJar.nestedJars wasn't working for some reason
++jar {
++	subprojects.each {
++		if (it.name in devOnlyModules) return
+ 
+-			testmodImplementation project("${it.name}:").sourceSets.testmod.output
++		// TODO signing?
++		from(project("${it.name}:").tasks.getByName(/*signingEnabled ? "signRemapJar" : */"copyUnmappedJar").outputs.files) {
++			into "META-INF/jars"
+ 		}
+ 	}
+ }
++// gambeson end
+ 
+ remapJar {
+ 	afterEvaluate {
+@@ -389,7 +438,7 @@ remapJar {
+ 			if (it.name in devOnlyModules) return
+ 
+ 			// Include the signed or none signed jar from the sub project.
+-			nestedJars.from project("${it.name}:").tasks.getByName(signingEnabled ? "signRemapJar" : "remapJar")
++			// gambeson: nestedJars removed
+ 		}
+ 	}
+ }
 diff --git a/gradle.properties b/gradle.properties
-index 3ce04ecdd6e1e2639c11c0ea0247d9c1af854f61..5cc0fd12ce45a54bff944971d7a1aaf576651282 100644
+index 3ce04ecdd6e1e2639c11c0ea0247d9c1af854f61..d9c4e08de6a4b5f39544915b9ead0d66526c76b1 100644
 --- a/gradle.properties
 +++ b/gradle.properties
-@@ -7,6 +7,9 @@ loader_version=0.13.2
+@@ -7,6 +7,10 @@ loader_version=0.13.2
  
  prerelease=false
  
++# gambeson: forge dependency
 +loom.platform=forge
 +forge_version=40.0.32
 +
@@ -49,19 +144,21 @@ index 3ce04ecdd6e1e2639c11c0ea0247d9c1af854f61..5cc0fd12ce45a54bff944971d7a1aaf5
  fabric-api-base-version=0.4.4
  fabric-api-lookup-api-v1-version=1.6.0
 diff --git a/settings.gradle b/settings.gradle
-index 813b02b61f80e478594a01b9cf33be9606249a89..548d7173e30b384b12008d942b82fcc60cbc92a2 100644
+index 813b02b61f80e478594a01b9cf33be9606249a89..51b3f58cd3ac4a5b6321fad8133507ecaf877347 100644
 --- a/settings.gradle
 +++ b/settings.gradle
-@@ -5,6 +5,12 @@ pluginManagement {
+@@ -5,6 +5,14 @@ pluginManagement {
  			name = 'Fabric'
  			url = 'https://maven.fabricmc.net/'
  		}
++		// gambeson: repositories for architectury and forge
 +		maven {
 +			url "https://maven.architectury.dev/"
 +		}
 +		maven {
 +			url "https://files.minecraftforge.net/maven/"
 +		}
++		// gambeson end
  		mavenLocal()
  	}
  }
