@@ -1,0 +1,550 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CursedFlames <18627001+CursedFlames@users.noreply.github.com>
+Date: Tue, 11 Jul 2023 19:46:50 +1200
+Subject: [PATCH] temporary hacks so mod builds
+
+
+diff --git a/fabric-command-api-v2/src/main/java/net/fabricmc/fabric/api/command/v2/EntitySelectorOptionRegistry.java b/fabric-command-api-v2/src/main/java/net/fabricmc/fabric/api/command/v2/EntitySelectorOptionRegistry.java
+index 01caa7e470a9da8480d47d168e178fee5651bb47..96cf2c78ec3b23890129021193cebcedd00b662f 100644
+--- a/fabric-command-api-v2/src/main/java/net/fabricmc/fabric/api/command/v2/EntitySelectorOptionRegistry.java
++++ b/fabric-command-api-v2/src/main/java/net/fabricmc/fabric/api/command/v2/EntitySelectorOptionRegistry.java
+@@ -76,9 +76,6 @@ public final class EntitySelectorOptionRegistry {
+ 	 * @param handler the handler for the entity option that reads and sets the predicate
+ 	 */
+ 	public static void registerNonRepeatable(Identifier id, Text description, EntitySelectorOptions.SelectorHandler handler) {
+-		register(id, description, (reader) -> {
+-			handler.handle(reader);
+-			reader.setCustomFlag(id, true);
+-		}, (reader) -> !reader.getCustomFlag(id)); // has a flag = used before
++		register(id, description, handler, (reader) -> true); // has a flag = used before
+ 	}
+ }
+diff --git a/fabric-content-registries-v0/src/main/java/net/fabricmc/fabric/api/registry/FabricBrewingRecipeRegistry.java b/fabric-content-registries-v0/src/main/java/net/fabricmc/fabric/api/registry/FabricBrewingRecipeRegistry.java
+index f41dc9d51e09b28e90d627065569ab08eb79006a..b0adbe82ab111a4de7224cd9be75603ac0aad153 100644
+--- a/fabric-content-registries-v0/src/main/java/net/fabricmc/fabric/api/registry/FabricBrewingRecipeRegistry.java
++++ b/fabric-content-registries-v0/src/main/java/net/fabricmc/fabric/api/registry/FabricBrewingRecipeRegistry.java
+@@ -24,6 +24,8 @@ import net.minecraft.potion.Potion;
+ import net.minecraft.recipe.BrewingRecipeRegistry;
+ import net.minecraft.recipe.Ingredient;
+ 
++import net.minecraftforge.registries.ForgeRegistries;
++
+ /**
+  * Counterpart of {@link BrewingRecipeRegistry} with methods that allow adding recipes which use Ingredients instead of Items.
+  */
+@@ -45,7 +47,7 @@ public final class FabricBrewingRecipeRegistry {
+ 		Objects.requireNonNull(ingredient, "Ingredient cannot be null!");
+ 		Objects.requireNonNull(output, "Output cannot be null!");
+ 
+-		BrewingRecipeRegistry.ITEM_RECIPES.add(new BrewingRecipeRegistry.Recipe<>(input, ingredient, output));
++		BrewingRecipeRegistry.ITEM_RECIPES.add(new BrewingRecipeRegistry.Recipe<>(ForgeRegistries.ITEMS, input, ingredient, output));
+ 	}
+ 
+ 	/**
+@@ -62,6 +64,6 @@ public final class FabricBrewingRecipeRegistry {
+ 		Objects.requireNonNull(ingredient, "Ingredient cannot be null!");
+ 		Objects.requireNonNull(output, "Output cannot be null");
+ 
+-		BrewingRecipeRegistry.POTION_RECIPES.add(new BrewingRecipeRegistry.Recipe<>(input, ingredient, output));
++		BrewingRecipeRegistry.POTION_RECIPES.add(new BrewingRecipeRegistry.Recipe<>(ForgeRegistries.POTIONS, input, ingredient, output));
+ 	}
+ }
+diff --git a/fabric-data-generation-api-v1/src/main/java/net/fabricmc/fabric/api/datagen/v1/provider/FabricTagProvider.java b/fabric-data-generation-api-v1/src/main/java/net/fabricmc/fabric/api/datagen/v1/provider/FabricTagProvider.java
+index b7cc0077a23d37e4dfd0f45227a3763951cae7f4..2e637b168e3d5e0d39ba04cb526c573db02603d1 100644
+--- a/fabric-data-generation-api-v1/src/main/java/net/fabricmc/fabric/api/datagen/v1/provider/FabricTagProvider.java
++++ b/fabric-data-generation-api-v1/src/main/java/net/fabricmc/fabric/api/datagen/v1/provider/FabricTagProvider.java
+@@ -242,7 +242,7 @@ public abstract class FabricTagProvider<T> extends TagProvider<T> {
+ 		private final TagProvider.ProvidedTagBuilder<T> parent;
+ 
+ 		private FabricTagBuilder(ProvidedTagBuilder<T> parent) {
+-			super(parent.builder);
++			super(parent.builder, "fabric");
+ 			this.parent = parent;
+ 		}
+ 
+diff --git a/fabric-dimensions-v1/src/main/java/net/fabricmc/fabric/mixin/dimension/EntityMixin.java b/fabric-dimensions-v1/src/main/java/net/fabricmc/fabric/mixin/dimension/EntityMixin.java
+index 80bb69d9046befb98e5a816344e3e441697ef70e..e2a20e0f3f2b194375377664a4b5ac6840d3c138 100644
+--- a/fabric-dimensions-v1/src/main/java/net/fabricmc/fabric/mixin/dimension/EntityMixin.java
++++ b/fabric-dimensions-v1/src/main/java/net/fabricmc/fabric/mixin/dimension/EntityMixin.java
+@@ -60,15 +60,16 @@ public class EntityMixin implements Teleportable {
+ 		}
+ 	}
+ 
+-	/**
+-	 * This stops the following behaviors, in 1 mixin.
+-	 * - ServerWorld#createEndSpawnPlatform in Entity
+-	 * - End-to-overworld spawning behavior in ServerPlayerEntity
+-	 * - ServerPlayerEntity#createEndSpawnPlatform in ServerPlayerEntity
+-	 */
+-	@Redirect(method = "moveToWorld", at = @At(value = "FIELD", target = "Lnet/minecraft/world/World;END:Lnet/minecraft/registry/RegistryKey;"))
+-	private RegistryKey<World> stopEndSpecificBehavior() {
+-		if (this.customTeleportTarget != null) return null;
+-		return World.END;
+-	}
++	// TODO necessary?
++//	/**
++//	 * This stops the following behaviors, in 1 mixin.
++//	 * - ServerWorld#createEndSpawnPlatform in Entity
++//	 * - End-to-overworld spawning behavior in ServerPlayerEntity
++//	 * - ServerPlayerEntity#createEndSpawnPlatform in ServerPlayerEntity
++//	 */
++//	@Redirect(method = "moveToWorld", at = @At(value = "FIELD", target = "Lnet/minecraft/world/World;END:Lnet/minecraft/registry/RegistryKey;"))
++//	private RegistryKey<World> stopEndSpecificBehavior() {
++//		if (this.customTeleportTarget != null) return null;
++//		return World.END;
++//	}
+ }
+diff --git a/fabric-item-api-v1/src/main/java/net/fabricmc/fabric/mixin/item/AbstractFurnaceBlockEntityMixin.java b/fabric-item-api-v1/src/main/java/net/fabricmc/fabric/mixin/item/AbstractFurnaceBlockEntityMixin.java
+index b364b8abd38fcab1933635a25b6b0750e703cac2..bf4b10032691630316584b2b7c232e56eb0f53fc 100644
+--- a/fabric-item-api-v1/src/main/java/net/fabricmc/fabric/mixin/item/AbstractFurnaceBlockEntityMixin.java
++++ b/fabric-item-api-v1/src/main/java/net/fabricmc/fabric/mixin/item/AbstractFurnaceBlockEntityMixin.java
+@@ -36,15 +36,15 @@ public abstract class AbstractFurnaceBlockEntityMixin {
+ 	@Unique
+ 	private static final ThreadLocal<ItemStack> REMAINDER_STACK = new ThreadLocal<>();
+ 
+-	@Inject(method = "tick", at = @At(value = "INVOKE", target = "Lnet/minecraft/item/ItemStack;getItem()Lnet/minecraft/item/Item;"), locals = LocalCapture.CAPTURE_FAILHARD, allow = 1)
+-	private static void getStackRemainder(World world, BlockPos pos, BlockState state, AbstractFurnaceBlockEntity blockEntity, CallbackInfo ci, boolean bl, boolean bl2, ItemStack itemStack, boolean bl3, boolean bl4, Recipe recipe, int i) {
+-		REMAINDER_STACK.set(itemStack.getRecipeRemainder());
+-	}
+-
+-	@ModifyArg(method = "tick", at = @At(value = "INVOKE", target = "Lnet/minecraft/util/collection/DefaultedList;set(ILjava/lang/Object;)Ljava/lang/Object;"), index = 1, allow = 1)
+-	private static <E> E setStackRemainder(E element) {
+-		E remainder = (E) REMAINDER_STACK.get();
+-		REMAINDER_STACK.remove();
+-		return remainder;
+-	}
++//	@Inject(method = "tick", at = @At(value = "INVOKE", target = "Lnet/minecraft/item/ItemStack;getItem()Lnet/minecraft/item/Item;"), locals = LocalCapture.CAPTURE_FAILHARD, allow = 1)
++//	private static void getStackRemainder(World world, BlockPos pos, BlockState state, AbstractFurnaceBlockEntity blockEntity, CallbackInfo ci, boolean bl, boolean bl2, ItemStack itemStack, boolean bl3, boolean bl4, Recipe recipe, int i) {
++//		REMAINDER_STACK.set(itemStack.getRecipeRemainder());
++//	}
++//
++//	@ModifyArg(method = "tick", at = @At(value = "INVOKE", target = "Lnet/minecraft/util/collection/DefaultedList;set(ILjava/lang/Object;)Ljava/lang/Object;"), index = 1, allow = 1)
++//	private static <E> E setStackRemainder(E element) {
++//		E remainder = (E) REMAINDER_STACK.get();
++//		REMAINDER_STACK.remove();
++//		return remainder;
++//	}
+ }
+diff --git a/fabric-item-api-v1/src/main/java/net/fabricmc/fabric/mixin/item/BrewingStandBlockEntityMixin.java b/fabric-item-api-v1/src/main/java/net/fabricmc/fabric/mixin/item/BrewingStandBlockEntityMixin.java
+index c397ad1fec594a08e30f3eb0f2b4280352628f04..657adab3b1bc96b66b35e52206cf998d3e3b3170 100644
+--- a/fabric-item-api-v1/src/main/java/net/fabricmc/fabric/mixin/item/BrewingStandBlockEntityMixin.java
++++ b/fabric-item-api-v1/src/main/java/net/fabricmc/fabric/mixin/item/BrewingStandBlockEntityMixin.java
+@@ -34,26 +34,26 @@ import net.minecraft.world.World;
+ 
+ @Mixin(BrewingStandBlockEntity.class)
+ public class BrewingStandBlockEntityMixin {
+-	@Unique
+-	private static final ThreadLocal<ItemStack> REMAINDER_STACK = new ThreadLocal<>();
+-
+-	@Inject(method = "craft", at = @At(value = "INVOKE", target = "Lnet/minecraft/item/ItemStack;decrement(I)V", shift = At.Shift.AFTER), locals = LocalCapture.CAPTURE_FAILHARD)
+-	private static void captureItemStack(World world, BlockPos pos, DefaultedList<ItemStack> slots, CallbackInfo ci, ItemStack itemStack) {
+-		REMAINDER_STACK.set(itemStack.getRecipeRemainder());
+-	}
+-
+-	@Redirect(method = "craft", at = @At(value = "INVOKE", target = "Lnet/minecraft/item/Item;hasRecipeRemainder()Z"))
+-	private static boolean hasStackRecipeRemainder(Item instance) {
+-		return !REMAINDER_STACK.get().isEmpty();
+-	}
+-
+-	/**
+-	 * Injected after the {@link Item#getRecipeRemainder} to replace the old remainder with are new one.
+-	 */
+-	@ModifyVariable(method = "craft", at = @At(value = "STORE"), index = 4)
+-	private static ItemStack createStackRecipeRemainder(ItemStack old) {
+-		ItemStack remainder = REMAINDER_STACK.get();
+-		REMAINDER_STACK.remove();
+-		return remainder;
+-	}
++//	@Unique
++//	private static final ThreadLocal<ItemStack> REMAINDER_STACK = new ThreadLocal<>();
++//
++//	@Inject(method = "craft", at = @At(value = "INVOKE", target = "Lnet/minecraft/item/ItemStack;decrement(I)V", shift = At.Shift.AFTER), locals = LocalCapture.CAPTURE_FAILHARD)
++//	private static void captureItemStack(World world, BlockPos pos, DefaultedList<ItemStack> slots, CallbackInfo ci, ItemStack itemStack) {
++//		REMAINDER_STACK.set(itemStack.getRecipeRemainder());
++//	}
++//
++//	@Redirect(method = "craft", at = @At(value = "INVOKE", target = "Lnet/minecraft/item/Item;hasRecipeRemainder()Z"))
++//	private static boolean hasStackRecipeRemainder(Item instance) {
++//		return !REMAINDER_STACK.get().isEmpty();
++//	}
++//
++//	/**
++//	 * Injected after the {@link Item#getRecipeRemainder} to replace the old remainder with are new one.
++//	 */
++//	@ModifyVariable(method = "craft", at = @At(value = "STORE"), index = 4)
++//	private static ItemStack createStackRecipeRemainder(ItemStack old) {
++//		ItemStack remainder = REMAINDER_STACK.get();
++//		REMAINDER_STACK.remove();
++//		return remainder;
++//	}
+ }
+diff --git a/fabric-item-api-v1/src/main/java/net/fabricmc/fabric/mixin/item/ItemStackMixin.java b/fabric-item-api-v1/src/main/java/net/fabricmc/fabric/mixin/item/ItemStackMixin.java
+index 89df9b5c8133cf17ba4bee05b618080263eafac8..5e5b52b12a3dc3fc44bf7e08e426b2b6f8fd7e00 100644
+--- a/fabric-item-api-v1/src/main/java/net/fabricmc/fabric/mixin/item/ItemStackMixin.java
++++ b/fabric-item-api-v1/src/main/java/net/fabricmc/fabric/mixin/item/ItemStackMixin.java
+@@ -75,29 +75,29 @@ public abstract class ItemStackMixin implements FabricItemStack {
+ 		this.fabric_breakCallback = null;
+ 	}
+ 
+-	@Redirect(
+-			method = "getAttributeModifiers",
+-			at = @At(
+-					value = "INVOKE",
+-					target = "Lnet/minecraft/item/Item;getAttributeModifiers(Lnet/minecraft/entity/EquipmentSlot;)Lcom/google/common/collect/Multimap;"
+-			)
+-	)
+-	public Multimap<EntityAttribute, EntityAttributeModifier> hookGetAttributeModifiers(Item item, EquipmentSlot slot) {
+-		ItemStack stack = (ItemStack) (Object) this;
+-		//we need to ensure it is modifiable for the callback, use linked map to preserve ordering
+-		Multimap<EntityAttribute, EntityAttributeModifier> attributeModifiers = LinkedHashMultimap.create(item.getAttributeModifiers(stack, slot));
+-		ModifyItemAttributeModifiersCallback.EVENT.invoker().modifyAttributeModifiers(stack, slot, attributeModifiers);
+-		return attributeModifiers;
+-	}
+-
+-	@Redirect(
+-			method = "isSuitableFor",
+-			at = @At(
+-					value = "INVOKE",
+-					target = "Lnet/minecraft/item/Item;isSuitableFor(Lnet/minecraft/block/BlockState;)Z"
+-			)
+-	)
+-	public boolean hookIsSuitableFor(Item item, BlockState state) {
+-		return item.isSuitableFor((ItemStack) (Object) this, state);
+-	}
++//	@Redirect(
++//			method = "getAttributeModifiers",
++//			at = @At(
++//					value = "INVOKE",
++//					target = "Lnet/minecraft/item/Item;getAttributeModifiers(Lnet/minecraft/entity/EquipmentSlot;)Lcom/google/common/collect/Multimap;"
++//			)
++//	)
++//	public Multimap<EntityAttribute, EntityAttributeModifier> hookGetAttributeModifiers(Item item, EquipmentSlot slot) {
++//		ItemStack stack = (ItemStack) (Object) this;
++//		//we need to ensure it is modifiable for the callback, use linked map to preserve ordering
++//		Multimap<EntityAttribute, EntityAttributeModifier> attributeModifiers = LinkedHashMultimap.create(item.getAttributeModifiers(stack, slot));
++//		ModifyItemAttributeModifiersCallback.EVENT.invoker().modifyAttributeModifiers(stack, slot, attributeModifiers);
++//		return attributeModifiers;
++//	}
++//
++//	@Redirect(
++//			method = "isSuitableFor",
++//			at = @At(
++//					value = "INVOKE",
++//					target = "Lnet/minecraft/item/Item;isSuitableFor(Lnet/minecraft/block/BlockState;)Z"
++//			)
++//	)
++//	public boolean hookIsSuitableFor(Item item, BlockState state) {
++//		return item.isSuitableFor((ItemStack) (Object) this, state);
++//	}
+ }
+diff --git a/fabric-item-api-v1/src/main/java/net/fabricmc/fabric/mixin/item/RecipeMixin.java b/fabric-item-api-v1/src/main/java/net/fabricmc/fabric/mixin/item/RecipeMixin.java
+index b7da96eec26f5e155455c2e85f8d0b881de55a8f..dea5fc2e68f978995a4fec7b105723cd2c03aca8 100644
+--- a/fabric-item-api-v1/src/main/java/net/fabricmc/fabric/mixin/item/RecipeMixin.java
++++ b/fabric-item-api-v1/src/main/java/net/fabricmc/fabric/mixin/item/RecipeMixin.java
+@@ -34,25 +34,26 @@ import net.fabricmc.fabric.impl.item.RecipeRemainderHandler;
+ 
+ @Mixin(Recipe.class)
+ public interface RecipeMixin<C extends Inventory> {
+-	@Inject(method = "getRemainder", at = @At(value = "INVOKE", target = "Lnet/minecraft/inventory/Inventory;getStack(I)Lnet/minecraft/item/ItemStack;"), locals = LocalCapture.CAPTURE_FAILHARD)
+-	default void captureStack(C inventory, CallbackInfoReturnable<DefaultedList<ItemStack>> cir, DefaultedList<ItemStack> defaultedList, int i) {
+-		RecipeRemainderHandler.REMAINDER_STACK.set(inventory.getStack(i).getRecipeRemainder());
+-	}
+-
+-	@Redirect(method = "getRemainder", at = @At(value = "INVOKE", target = "Lnet/minecraft/item/Item;hasRecipeRemainder()Z"))
+-	private boolean hasStackRemainder(Item instance) {
+-		return !RecipeRemainderHandler.REMAINDER_STACK.get().isEmpty();
+-	}
+-
+-	@Redirect(method = "getRemainder", at = @At(value = "INVOKE", target = "Lnet/minecraft/item/Item;getRecipeRemainder()Lnet/minecraft/item/Item;"))
+-	private Item replaceGetRecipeRemainder(Item instance) {
+-		return Items.AIR;
+-	}
+-
+-	@Redirect(method = "getRemainder", at = @At(value = "INVOKE", target = "Lnet/minecraft/util/collection/DefaultedList;set(ILjava/lang/Object;)Ljava/lang/Object;"))
+-	private Object getStackRemainder(DefaultedList<ItemStack> inventory, int index, Object element) {
+-		Object remainder = inventory.set(index, RecipeRemainderHandler.REMAINDER_STACK.get());
+-		RecipeRemainderHandler.REMAINDER_STACK.remove();
+-		return remainder;
+-	}
++	// TODO
++//	@Inject(method = "getRemainder", at = @At(value = "INVOKE", target = "Lnet/minecraft/inventory/Inventory;getStack(I)Lnet/minecraft/item/ItemStack;"), locals = LocalCapture.CAPTURE_FAILHARD)
++//	default void captureStack(C inventory, CallbackInfoReturnable<DefaultedList<ItemStack>> cir, DefaultedList<ItemStack> defaultedList, int i) {
++//		RecipeRemainderHandler.REMAINDER_STACK.set(inventory.getStack(i).getRecipeRemainder());
++//	}
++//
++//	@Redirect(method = "getRemainder", at = @At(value = "INVOKE", target = "Lnet/minecraft/item/Item;hasRecipeRemainder()Z"))
++//	private boolean hasStackRemainder(Item instance) {
++//		return !RecipeRemainderHandler.REMAINDER_STACK.get().isEmpty();
++//	}
++//
++//	@Redirect(method = "getRemainder", at = @At(value = "INVOKE", target = "Lnet/minecraft/item/Item;getRecipeRemainder()Lnet/minecraft/item/Item;"))
++//	private Item replaceGetRecipeRemainder(Item instance) {
++//		return Items.AIR;
++//	}
++//
++//	@Redirect(method = "getRemainder", at = @At(value = "INVOKE", target = "Lnet/minecraft/util/collection/DefaultedList;set(ILjava/lang/Object;)Ljava/lang/Object;"))
++//	private Object getStackRemainder(DefaultedList<ItemStack> inventory, int index, Object element) {
++//		Object remainder = inventory.set(index, RecipeRemainderHandler.REMAINDER_STACK.get());
++//		RecipeRemainderHandler.REMAINDER_STACK.remove();
++//		return remainder;
++//	}
+ }
+diff --git a/fabric-loot-api-v2/src/main/java/net/fabricmc/fabric/api/loot/v2/FabricLootPoolBuilder.java b/fabric-loot-api-v2/src/main/java/net/fabricmc/fabric/api/loot/v2/FabricLootPoolBuilder.java
+index 90d3db90d7d3052239094a24e92de864e63f885a..2035bd624baca688e5569e220c9abb29238e9c47 100644
+--- a/fabric-loot-api-v2/src/main/java/net/fabricmc/fabric/api/loot/v2/FabricLootPoolBuilder.java
++++ b/fabric-loot-api-v2/src/main/java/net/fabricmc/fabric/api/loot/v2/FabricLootPoolBuilder.java
+@@ -103,12 +103,13 @@ public interface FabricLootPoolBuilder {
+ 	 * @return the copied builder
+ 	 */
+ 	static LootPool.Builder copyOf(LootPool pool) {
++		// FIXME
+ 		LootPoolAccessor accessor = (LootPoolAccessor) pool;
+-		return LootPool.builder()
+-				.rolls(accessor.fabric_getRolls())
+-				.bonusRolls(accessor.fabric_getBonusRolls())
+-				.with(List.of(accessor.fabric_getEntries()))
+-				.conditionally(List.of(accessor.fabric_getConditions()))
+-				.apply(List.of(accessor.fabric_getFunctions()));
++		return LootPool.builder();
++//				.rolls(accessor.fabric_getRolls())
++//				.bonusRolls(accessor.fabric_getBonusRolls())
++//				.with(List.of(accessor.fabric_getEntries()))
++//				.conditionally(List.of(accessor.fabric_getConditions()))
++//				.apply(List.of(accessor.fabric_getFunctions()));
+ 	}
+ }
+diff --git a/fabric-loot-api-v2/src/main/java/net/fabricmc/fabric/api/loot/v2/FabricLootTableBuilder.java b/fabric-loot-api-v2/src/main/java/net/fabricmc/fabric/api/loot/v2/FabricLootTableBuilder.java
+index 949d045bce63f84ab69ae42ecd0aead5a472b4d8..16e4d1e89b36bccf6f1283d37820d110f9b05be7 100644
+--- a/fabric-loot-api-v2/src/main/java/net/fabricmc/fabric/api/loot/v2/FabricLootTableBuilder.java
++++ b/fabric-loot-api-v2/src/main/java/net/fabricmc/fabric/api/loot/v2/FabricLootTableBuilder.java
+@@ -101,12 +101,13 @@ public interface FabricLootTableBuilder {
+ 	 */
+ 	static LootTable.Builder copyOf(LootTable table) {
+ 		LootTable.Builder builder = LootTable.builder();
+-		LootTableAccessor accessor = (LootTableAccessor) table;
+-
+-		builder.type(table.getType());
+-		builder.pools(List.of(accessor.fabric_getPools()));
+-		builder.apply(List.of(accessor.fabric_getFunctions()));
+-		builder.randomSequenceId(accessor.fabric_getRandomSequenceId());
++		// FIXME
++//		LootTableAccessor accessor = (LootTableAccessor) table;
++//
++//		builder.type(table.getType());
++//		builder.pools(List.of(accessor.fabric_getPools()));
++//		builder.apply(List.of(accessor.fabric_getFunctions()));
++//		builder.randomSequenceId(accessor.fabric_getRandomSequenceId());
+ 
+ 		return builder;
+ 	}
+diff --git a/fabric-loot-api-v2/src/main/java/net/fabricmc/fabric/mixin/loot/LootTableAccessor.java b/fabric-loot-api-v2/src/main/java/net/fabricmc/fabric/mixin/loot/LootTableAccessor.java
+index 741e6ab1cd9c8a9cdf76e273ec5b42b61539227d..61b78a44dfb42369ba387950f4f58b52186be823 100644
+--- a/fabric-loot-api-v2/src/main/java/net/fabricmc/fabric/mixin/loot/LootTableAccessor.java
++++ b/fabric-loot-api-v2/src/main/java/net/fabricmc/fabric/mixin/loot/LootTableAccessor.java
+@@ -24,18 +24,24 @@ import net.minecraft.loot.LootTable;
+ import net.minecraft.loot.function.LootFunction;
+ import net.minecraft.util.Identifier;
+ 
++import java.util.List;
++
+ /**
+  * Accesses loot table fields for {@link net.fabricmc.fabric.api.loot.v2.FabricLootTableBuilder#copyOf(LootTable)}.
+  * These are normally available in the transitive access widener module.
+  */
+ @Mixin(LootTable.class)
+-public interface LootTableAccessor {
+-	@Accessor("pools")
+-	LootPool[] fabric_getPools();
++public abstract class LootTableAccessor {
++	@Accessor("f_79109_")
++	abstract List<LootPool> fabric_getPools__();
++
++	public LootPool[] fabric_getPools() {
++		return fabric_getPools__().toArray(new LootPool[0]);
++	}
+ 
+ 	@Accessor("functions")
+-	LootFunction[] fabric_getFunctions();
++	abstract LootFunction[] fabric_getFunctions();
+ 
+ 	@Accessor("randomSequenceId")
+-	Identifier fabric_getRandomSequenceId();
++	abstract Identifier fabric_getRandomSequenceId();
+ }
+diff --git a/fabric-particles-v1/src/client/java/net/fabricmc/fabric/impl/client/particle/FabricSpriteProviderImpl.java b/fabric-particles-v1/src/client/java/net/fabricmc/fabric/impl/client/particle/FabricSpriteProviderImpl.java
+index ef4ed780442368186d6a6a06e44d765df721360c..9a2f2702ddf2533aa4c18a5fa4621247eba372e0 100644
+--- a/fabric-particles-v1/src/client/java/net/fabricmc/fabric/impl/client/particle/FabricSpriteProviderImpl.java
++++ b/fabric-particles-v1/src/client/java/net/fabricmc/fabric/impl/client/particle/FabricSpriteProviderImpl.java
+@@ -38,12 +38,14 @@ public class FabricSpriteProviderImpl implements FabricSpriteProvider {
+ 
+ 	@Override
+ 	public SpriteAtlasTexture getAtlas() {
+-		return ((ParticleManagerAccessor) particleManager).getParticleAtlasTexture();
++		return null; //FIXME
++//		return ((ParticleManagerAccessor) particleManager).getParticleAtlasTexture();
+ 	}
+ 
+ 	@Override
+ 	public List<Sprite> getSprites() {
+-		return ((ParticleManagerAccessor.SimpleSpriteProviderAccessor) delegate).getSprites();
++		return List.of(); //FIXME
++//		return ((ParticleManagerAccessor.SimpleSpriteProviderAccessor) delegate).getSprites();
+ 	}
+ 
+ 	@Override
+diff --git a/fabric-particles-v1/src/client/java/net/fabricmc/fabric/impl/client/particle/ParticleFactoryRegistryImpl.java b/fabric-particles-v1/src/client/java/net/fabricmc/fabric/impl/client/particle/ParticleFactoryRegistryImpl.java
+index 11ad8ada0aa9bec966907714416c90c3f384f5e9..5d9e36d91c016497479f1c7ee52fbd37ef2b6118 100644
+--- a/fabric-particles-v1/src/client/java/net/fabricmc/fabric/impl/client/particle/ParticleFactoryRegistryImpl.java
++++ b/fabric-particles-v1/src/client/java/net/fabricmc/fabric/impl/client/particle/ParticleFactoryRegistryImpl.java
+@@ -72,14 +72,14 @@ public final class ParticleFactoryRegistryImpl implements ParticleFactoryRegistr
+ 
+ 		@Override
+ 		public <T extends ParticleEffect> void register(ParticleType<T> type, ParticleFactory<T> factory) {
+-			((ParticleManagerAccessor) particleManager).getFactories().put(Registries.PARTICLE_TYPE.getRawId(type), factory);
++//			((ParticleManagerAccessor) particleManager).getFactories().put(Registries.PARTICLE_TYPE.getRawId(type), factory);
+ 		}
+ 
+ 		@Override
+ 		public <T extends ParticleEffect> void register(ParticleType<T> type, PendingParticleFactory<T> constructor) {
+ 			SpriteProvider delegate = new ParticleManager.SimpleSpriteProvider();
+ 			FabricSpriteProvider fabricSpriteProvider = new FabricSpriteProviderImpl(particleManager, delegate);
+-			((ParticleManagerAccessor) particleManager).getSpriteAwareFactories().put(Registries.PARTICLE_TYPE.getId(type), delegate);
++//			((ParticleManagerAccessor) particleManager).getSpriteAwareFactories().put(Registries.PARTICLE_TYPE.getId(type), delegate);
+ 			register(type, constructor.create(fabricSpriteProvider));
+ 		}
+ 	}
+diff --git a/fabric-particles-v1/src/client/java/net/fabricmc/fabric/mixin/client/particle/ParticleManagerAccessor.java b/fabric-particles-v1/src/client/java/net/fabricmc/fabric/mixin/client/particle/ParticleManagerAccessor.java
+index 0136b2a60602e0957ed682ad799d3f4560212c05..72d17d15b6c7f2c5e1c7fa8a6d9ec275acdf97ba 100644
+--- a/fabric-particles-v1/src/client/java/net/fabricmc/fabric/mixin/client/particle/ParticleManagerAccessor.java
++++ b/fabric-particles-v1/src/client/java/net/fabricmc/fabric/mixin/client/particle/ParticleManagerAccessor.java
+@@ -20,6 +20,7 @@ import java.util.List;
+ import java.util.Map;
+ 
+ import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
++import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
+ import org.spongepowered.asm.mixin.Mixin;
+ import org.spongepowered.asm.mixin.gen.Accessor;
+ 
+@@ -31,17 +32,29 @@ import net.minecraft.client.texture.SpriteAtlasTexture;
+ import net.minecraft.util.Identifier;
+ 
+ @Mixin(ParticleManager.class)
+-public interface ParticleManagerAccessor {
++public abstract class ParticleManagerAccessor {
+ 	@Accessor("particleAtlasTexture")
+-	SpriteAtlasTexture getParticleAtlasTexture();
++	abstract SpriteAtlasTexture getParticleAtlasTexture();
+ 
+-	@Accessor("factories")
+-	Int2ObjectMap<ParticleFactory<?>> getFactories();
++	@Accessor("f_107293_")
++	abstract Map<Identifier, ParticleFactory<?>> __getFactories();
++
++	// TODO what was the original behavior of the map? This might cause unintended effects (e.g. swapping particle types)
++	public Int2ObjectMap<ParticleFactory<?>> getFactories() {
++		var factories = __getFactories().values();
++		var map = new Int2ObjectOpenHashMap<ParticleFactory<?>>();
++		int i = 0;
++		for (var factory : factories) {
++			map.put(i, factory);
++			i++;
++		}
++		return map;
++	}
+ 
+ 	// NOTE: The field signature is actually Map<Identifier, SimpleSpriteProvider>
+ 	// This still works due to type erasure
+ 	@Accessor("spriteAwareFactories")
+-	Map<Identifier, SpriteProvider> getSpriteAwareFactories();
++	abstract Map<Identifier, SpriteProvider> getSpriteAwareFactories();
+ 
+ 	@Mixin(ParticleManager.SimpleSpriteProvider.class)
+ 	interface SimpleSpriteProviderAccessor {
+diff --git a/fabric-recipe-api-v1/src/main/java/net/fabricmc/fabric/impl/recipe/ingredient/CustomIngredientImpl.java b/fabric-recipe-api-v1/src/main/java/net/fabricmc/fabric/impl/recipe/ingredient/CustomIngredientImpl.java
+index 3e484fffe3ac1f6b7124f8daa21ea68e8a93ef48..cb5ac330fa7dd72712e7532948d12bd95d3273b6 100644
+--- a/fabric-recipe-api-v1/src/main/java/net/fabricmc/fabric/impl/recipe/ingredient/CustomIngredientImpl.java
++++ b/fabric-recipe-api-v1/src/main/java/net/fabricmc/fabric/impl/recipe/ingredient/CustomIngredientImpl.java
+@@ -98,23 +98,24 @@ public class CustomIngredientImpl extends Ingredient implements FabricIngredient
+ 		return stack != null && customIngredient.test(stack);
+ 	}
+ 
+-	@Override
+-	public void write(PacketByteBuf buf) {
+-		// Can be null if we're not writing a packet from the PacketEncoder; in that case, always write the full ingredient.
+-		// Chances are this is a mod's doing and the client has the Ingredient API with the relevant ingredients.
+-		Set<Identifier> supportedIngredients = CustomIngredientSync.CURRENT_SUPPORTED_INGREDIENTS.get();
+-
+-		if (supportedIngredients != null && !supportedIngredients.contains(customIngredient.getSerializer().getIdentifier())) {
+-			// The client doesn't support this custom ingredient, so we send the matching stacks as a regular ingredient.
+-			// Conveniently, this is exactly what the super call does.
+-			super.write(buf);
+-		} else {
+-			// The client supports this custom ingredient, so we send it as a custom ingredient.
+-			buf.writeVarInt(PACKET_MARKER);
+-			buf.writeIdentifier(customIngredient.getSerializer().getIdentifier());
+-			customIngredient.getSerializer().write(buf, coerceIngredient());
+-		}
+-	}
++	// TODO make super non-final
++//	@Override
++//	public void write(PacketByteBuf buf) {
++//		// Can be null if we're not writing a packet from the PacketEncoder; in that case, always write the full ingredient.
++//		// Chances are this is a mod's doing and the client has the Ingredient API with the relevant ingredients.
++//		Set<Identifier> supportedIngredients = CustomIngredientSync.CURRENT_SUPPORTED_INGREDIENTS.get();
++//
++//		if (supportedIngredients != null && !supportedIngredients.contains(customIngredient.getSerializer().getIdentifier())) {
++//			// The client doesn't support this custom ingredient, so we send the matching stacks as a regular ingredient.
++//			// Conveniently, this is exactly what the super call does.
++//			super.write(buf);
++//		} else {
++//			// The client supports this custom ingredient, so we send it as a custom ingredient.
++//			buf.writeVarInt(PACKET_MARKER);
++//			buf.writeIdentifier(customIngredient.getSerializer().getIdentifier());
++//			customIngredient.getSerializer().write(buf, coerceIngredient());
++//		}
++//	}
+ 
+ 	@Override
+ 	public JsonElement toJson() {
+diff --git a/fabric-sound-api-v1/src/client/java/net/fabricmc/fabric/mixin/client/sound/SoundSystemMixin.java b/fabric-sound-api-v1/src/client/java/net/fabricmc/fabric/mixin/client/sound/SoundSystemMixin.java
+index 1593a2bbe2960d0cdfc5fb6efffaa6f957856dd2..f867e6d1e134c1af69438cc21bde484d5ec0ad9b 100644
+--- a/fabric-sound-api-v1/src/client/java/net/fabricmc/fabric/mixin/client/sound/SoundSystemMixin.java
++++ b/fabric-sound-api-v1/src/client/java/net/fabricmc/fabric/mixin/client/sound/SoundSystemMixin.java
+@@ -29,14 +29,15 @@ import net.minecraft.util.Identifier;
+ 
+ @Mixin(SoundSystem.class)
+ public class SoundSystemMixin {
+-	@Redirect(
+-			method = "play(Lnet/minecraft/client/sound/SoundInstance;)V",
+-			at = @At(
+-					value = "INVOKE",
+-					target = "Lnet/minecraft/client/sound/SoundLoader;loadStreamed(Lnet/minecraft/util/Identifier;Z)Ljava/util/concurrent/CompletableFuture;"
+-			)
+-	)
+-	private CompletableFuture<?> getStream(SoundLoader loader, Identifier id, boolean looping, SoundInstance sound) {
+-		return sound.getAudioStream(loader, id, looping);
+-	}
++	// TODO
++//	@Redirect(
++//			method = "play(Lnet/minecraft/client/sound/SoundInstance;)V",
++//			at = @At(
++//					value = "INVOKE",
++//					target = "Lnet/minecraft/client/sound/SoundLoader;loadStreamed(Lnet/minecraft/util/Identifier;Z)Ljava/util/concurrent/CompletableFuture;"
++//			)
++//	)
++//	private CompletableFuture<?> getStream(SoundLoader loader, Identifier id, boolean looping, SoundInstance sound) {
++//		return sound.getAudioStream(loader, id, looping);
++//	}
+ }
+diff --git a/fabric-transitive-access-wideners-v1/src/main/resources/fabric-transitive-access-wideners-v1.accesswidener b/fabric-transitive-access-wideners-v1/src/main/resources/fabric-transitive-access-wideners-v1.accesswidener
+index eb8f468757fd7b10d0ae09074848d368d581cfbd..319911a811a4d784ad960349dd925274178d177d 100644
+--- a/fabric-transitive-access-wideners-v1/src/main/resources/fabric-transitive-access-wideners-v1.accesswidener
++++ b/fabric-transitive-access-wideners-v1/src/main/resources/fabric-transitive-access-wideners-v1.accesswidener
+@@ -25,7 +25,6 @@ transitive-accessible field net/minecraft/loot/LootPool conditions [Lnet/minecra
+ transitive-accessible field net/minecraft/loot/LootPool functions [Lnet/minecraft/loot/function/LootFunction;
+ transitive-accessible field net/minecraft/loot/LootPool rolls Lnet/minecraft/loot/provider/number/LootNumberProvider;
+ transitive-accessible field net/minecraft/loot/LootPool bonusRolls Lnet/minecraft/loot/provider/number/LootNumberProvider;
+-transitive-accessible field net/minecraft/loot/LootTable pools [Lnet/minecraft/loot/LootPool;
+ transitive-accessible field net/minecraft/loot/LootTable functions [Lnet/minecraft/loot/function/LootFunction;
+ 
+ # Villager trade factories

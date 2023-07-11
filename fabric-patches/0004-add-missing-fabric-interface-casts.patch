@@ -1,0 +1,400 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CursedFlames <18627001+CursedFlames@users.noreply.github.com>
+Date: Tue, 11 Jul 2023 19:21:17 +1200
+Subject: [PATCH] add missing fabric interface casts
+
+
+diff --git a/fabric-item-api-v1/src/client/java/net/fabricmc/fabric/mixin/item/client/ClientPlayerInteractionManagerMixin.java b/fabric-item-api-v1/src/client/java/net/fabricmc/fabric/mixin/item/client/ClientPlayerInteractionManagerMixin.java
+index e1bb1060c59816cfb059a9649b3f8254cf1430de..557d834579fc4894f99b2c48f6e3fe2909669069 100644
+--- a/fabric-item-api-v1/src/client/java/net/fabricmc/fabric/mixin/item/client/ClientPlayerInteractionManagerMixin.java
++++ b/fabric-item-api-v1/src/client/java/net/fabricmc/fabric/mixin/item/client/ClientPlayerInteractionManagerMixin.java
+@@ -16,6 +16,8 @@
+ 
+ package net.fabricmc.fabric.mixin.item.client;
+ 
++import net.fabricmc.fabric.api.item.v1.FabricItem;
++
+ import org.spongepowered.asm.mixin.Final;
+ import org.spongepowered.asm.mixin.Mixin;
+ import org.spongepowered.asm.mixin.Shadow;
+@@ -57,7 +59,7 @@ public class ClientPlayerInteractionManagerMixin {
+ 			ItemStack oldStack = this.selectedStack;
+ 			ItemStack newStack = this.client.player.getMainHandStack();
+ 
+-			if (oldStack.isOf(newStack.getItem()) && oldStack.getItem().allowContinuingBlockBreaking(this.client.player, oldStack, newStack)) {
++			if (oldStack.isOf(newStack.getItem()) && ((FabricItem) oldStack.getItem()).allowContinuingBlockBreaking(this.client.player, oldStack, newStack)) {
+ 				stackUnchanged = true;
+ 			}
+ 		}
+diff --git a/fabric-item-api-v1/src/client/java/net/fabricmc/fabric/mixin/item/client/HeldItemRendererMixin.java b/fabric-item-api-v1/src/client/java/net/fabricmc/fabric/mixin/item/client/HeldItemRendererMixin.java
+index 3f10a0e2111c25e846a377ebd923974af5c38e0f..55416a36f9e8098e54cb43d741045ab3cc0fc31e 100644
+--- a/fabric-item-api-v1/src/client/java/net/fabricmc/fabric/mixin/item/client/HeldItemRendererMixin.java
++++ b/fabric-item-api-v1/src/client/java/net/fabricmc/fabric/mixin/item/client/HeldItemRendererMixin.java
+@@ -51,7 +51,7 @@ public class HeldItemRendererMixin {
+ 		ItemStack newMainStack = client.player.getMainHandStack();
+ 
+ 		if (mainHand.getItem() == newMainStack.getItem()) {
+-			if (!mainHand.getItem().allowNbtUpdateAnimation(client.player, Hand.MAIN_HAND, mainHand, newMainStack)) {
++			if (!((FabricItem) mainHand.getItem()).allowNbtUpdateAnimation(client.player, Hand.MAIN_HAND, mainHand, newMainStack)) {
+ 				mainHand = newMainStack;
+ 			}
+ 		}
+@@ -60,7 +60,7 @@ public class HeldItemRendererMixin {
+ 		ItemStack newOffStack = client.player.getOffHandStack();
+ 
+ 		if (offHand.getItem() == newOffStack.getItem()) {
+-			if (!offHand.getItem().allowNbtUpdateAnimation(client.player, Hand.OFF_HAND, offHand, newOffStack)) {
++			if (!((FabricItem) offHand.getItem()).allowNbtUpdateAnimation(client.player, Hand.OFF_HAND, offHand, newOffStack)) {
+ 				offHand = newOffStack;
+ 			}
+ 		}
+diff --git a/fabric-item-api-v1/src/main/java/net/fabricmc/fabric/api/item/v1/FabricItemStack.java b/fabric-item-api-v1/src/main/java/net/fabricmc/fabric/api/item/v1/FabricItemStack.java
+index 0c646a6aad2a022dc221238e23d1fa2190915e91..1b5e9e924d2bd1fe8bd7d16ff4887914a5312d22 100644
+--- a/fabric-item-api-v1/src/main/java/net/fabricmc/fabric/api/item/v1/FabricItemStack.java
++++ b/fabric-item-api-v1/src/main/java/net/fabricmc/fabric/api/item/v1/FabricItemStack.java
+@@ -34,6 +34,6 @@ public interface FabricItemStack {
+ 	 * @return the leftover item
+ 	 */
+ 	default ItemStack getRecipeRemainder() {
+-		return ((ItemStack) this).getItem().getRecipeRemainder((ItemStack) this);
++		return ((FabricItem) ((ItemStack) (Object) this).getItem()).getRecipeRemainder((ItemStack) (Object) this);
+ 	}
+ }
+diff --git a/fabric-recipe-api-v1/src/main/java/net/fabricmc/fabric/impl/recipe/ingredient/CustomIngredientImpl.java b/fabric-recipe-api-v1/src/main/java/net/fabricmc/fabric/impl/recipe/ingredient/CustomIngredientImpl.java
+index 7c0f86654e117a6f610e7a727909add3cf01e31d..3e484fffe3ac1f6b7124f8daa21ea68e8a93ef48 100644
+--- a/fabric-recipe-api-v1/src/main/java/net/fabricmc/fabric/impl/recipe/ingredient/CustomIngredientImpl.java
++++ b/fabric-recipe-api-v1/src/main/java/net/fabricmc/fabric/impl/recipe/ingredient/CustomIngredientImpl.java
+@@ -24,6 +24,9 @@ import java.util.stream.Stream;
+ 
+ import com.google.gson.JsonElement;
+ import com.google.gson.JsonObject;
++
++import net.fabricmc.fabric.api.recipe.v1.ingredient.FabricIngredient;
++
+ import org.jetbrains.annotations.Nullable;
+ 
+ import net.minecraft.item.ItemStack;
+@@ -38,7 +41,7 @@ import net.fabricmc.fabric.api.recipe.v1.ingredient.CustomIngredientSerializer;
+  * To test this API beyond the unit tests, please refer to the recipe provider in the datagen API testmod.
+  * It contains various interesting recipes to test, and explains how to package them in a datapack.
+  */
+-public class CustomIngredientImpl extends Ingredient {
++public class CustomIngredientImpl extends Ingredient implements FabricIngredient {
+ 	// Static helpers used by the API
+ 
+ 	public static final String TYPE_KEY = "fabric:type";
+diff --git a/fabric-recipe-api-v1/src/main/java/net/fabricmc/fabric/impl/recipe/ingredient/builtin/CombinedIngredient.java b/fabric-recipe-api-v1/src/main/java/net/fabricmc/fabric/impl/recipe/ingredient/builtin/CombinedIngredient.java
+index 375d80503490a9f526f21b4e6627dccc37045db3..cd47ebe6bdb39590ae2491cf8cc153ddfc1a5531 100644
+--- a/fabric-recipe-api-v1/src/main/java/net/fabricmc/fabric/impl/recipe/ingredient/builtin/CombinedIngredient.java
++++ b/fabric-recipe-api-v1/src/main/java/net/fabricmc/fabric/impl/recipe/ingredient/builtin/CombinedIngredient.java
+@@ -21,6 +21,8 @@ import java.util.function.Function;
+ import com.google.gson.JsonArray;
+ import com.google.gson.JsonObject;
+ 
++import net.fabricmc.fabric.api.recipe.v1.ingredient.FabricIngredient;
++
+ import net.minecraft.network.PacketByteBuf;
+ import net.minecraft.recipe.Ingredient;
+ import net.minecraft.util.Identifier;
+@@ -46,7 +48,7 @@ abstract class CombinedIngredient implements CustomIngredient {
+ 	@Override
+ 	public boolean requiresTesting() {
+ 		for (Ingredient ingredient : ingredients) {
+-			if (ingredient.requiresTesting()) {
++			if (((FabricIngredient) ingredient).requiresTesting()) {
+ 				return true;
+ 			}
+ 		}
+diff --git a/fabric-recipe-api-v1/src/main/java/net/fabricmc/fabric/impl/recipe/ingredient/builtin/DifferenceIngredient.java b/fabric-recipe-api-v1/src/main/java/net/fabricmc/fabric/impl/recipe/ingredient/builtin/DifferenceIngredient.java
+index ec07b4f61a5f1bdeb2021a33a736b82f01d3028d..36954863400ae82502d0bc216f67bb4b6f44e134 100644
+--- a/fabric-recipe-api-v1/src/main/java/net/fabricmc/fabric/impl/recipe/ingredient/builtin/DifferenceIngredient.java
++++ b/fabric-recipe-api-v1/src/main/java/net/fabricmc/fabric/impl/recipe/ingredient/builtin/DifferenceIngredient.java
+@@ -21,6 +21,8 @@ import java.util.List;
+ 
+ import com.google.gson.JsonObject;
+ 
++import net.fabricmc.fabric.api.recipe.v1.ingredient.FabricIngredient;
++
+ import net.minecraft.item.ItemStack;
+ import net.minecraft.network.PacketByteBuf;
+ import net.minecraft.recipe.Ingredient;
+@@ -54,7 +56,7 @@ public class DifferenceIngredient implements CustomIngredient {
+ 
+ 	@Override
+ 	public boolean requiresTesting() {
+-		return base.requiresTesting() || subtracted.requiresTesting();
++		return ((FabricIngredient) base).requiresTesting() || ((FabricIngredient) subtracted).requiresTesting();
+ 	}
+ 
+ 	@Override
+diff --git a/fabric-recipe-api-v1/src/main/java/net/fabricmc/fabric/mixin/recipe/ingredient/ShapelessRecipeMixin.java b/fabric-recipe-api-v1/src/main/java/net/fabricmc/fabric/mixin/recipe/ingredient/ShapelessRecipeMixin.java
+index b7eefab426f70fb1d3be588963e0ece292bd4fa9..341e5c9b1bcf5f5bbd91d7bec9fbdce5c07a95d3 100644
+--- a/fabric-recipe-api-v1/src/main/java/net/fabricmc/fabric/mixin/recipe/ingredient/ShapelessRecipeMixin.java
++++ b/fabric-recipe-api-v1/src/main/java/net/fabricmc/fabric/mixin/recipe/ingredient/ShapelessRecipeMixin.java
+@@ -19,6 +19,8 @@ package net.fabricmc.fabric.mixin.recipe.ingredient;
+ import java.util.ArrayList;
+ import java.util.List;
+ 
++import net.fabricmc.fabric.api.recipe.v1.ingredient.FabricIngredient;
++
+ import org.spongepowered.asm.mixin.Final;
+ import org.spongepowered.asm.mixin.Mixin;
+ import org.spongepowered.asm.mixin.Shadow;
+@@ -50,7 +52,7 @@ public class ShapelessRecipeMixin {
+ 	@Inject(at = @At("RETURN"), method = "<init>")
+ 	private void cacheRequiresTesting(Identifier id, String group, CraftingRecipeCategory category, ItemStack output, DefaultedList<Ingredient> input, CallbackInfo ci) {
+ 		for (Ingredient ingredient : input) {
+-			if (ingredient.requiresTesting()) {
++			if (((FabricIngredient) ingredient).requiresTesting()) {
+ 				fabric_requiresTesting = true;
+ 				break;
+ 			}
+diff --git a/fabric-renderer-api-v1/src/client/java/net/fabricmc/fabric/api/renderer/v1/model/ForwardingBakedModel.java b/fabric-renderer-api-v1/src/client/java/net/fabricmc/fabric/api/renderer/v1/model/ForwardingBakedModel.java
+index ee4a824d92569dcb2fd51f5b47f712a22e5f0962..15696b610ad9530904f1ec5f1401822a0837d03a 100644
+--- a/fabric-renderer-api-v1/src/client/java/net/fabricmc/fabric/api/renderer/v1/model/ForwardingBakedModel.java
++++ b/fabric-renderer-api-v1/src/client/java/net/fabricmc/fabric/api/renderer/v1/model/ForwardingBakedModel.java
+@@ -37,23 +37,23 @@ import net.fabricmc.fabric.api.renderer.v1.render.RenderContext;
+  * Base class for specialized model implementations that need to wrap other baked models.
+  * Avoids boilerplate code for pass-through methods.
+  */
+-public abstract class ForwardingBakedModel implements BakedModel, WrapperBakedModel {
++public abstract class ForwardingBakedModel implements BakedModel, WrapperBakedModel, FabricBakedModel {
+ 	/** implementations must set this somehow. */
+ 	protected BakedModel wrapped;
+ 
+ 	@Override
+ 	public boolean isVanillaAdapter() {
+-		return wrapped.isVanillaAdapter();
++		return ((FabricBakedModel) wrapped).isVanillaAdapter();
+ 	}
+ 
+ 	@Override
+ 	public void emitBlockQuads(BlockRenderView blockView, BlockState state, BlockPos pos, Supplier<Random> randomSupplier, RenderContext context) {
+-		wrapped.emitBlockQuads(blockView, state, pos, randomSupplier, context);
++		((FabricBakedModel) wrapped).emitBlockQuads(blockView, state, pos, randomSupplier, context);
+ 	}
+ 
+ 	@Override
+ 	public void emitItemQuads(ItemStack stack, Supplier<Random> randomSupplier, RenderContext context) {
+-		wrapped.emitItemQuads(stack, randomSupplier, context);
++		((FabricBakedModel) wrapped).emitItemQuads(stack, randomSupplier, context);
+ 	}
+ 
+ 	@Override
+diff --git a/fabric-renderer-api-v1/src/client/java/net/fabricmc/fabric/mixin/renderer/client/MultipartBakedModelMixin.java b/fabric-renderer-api-v1/src/client/java/net/fabricmc/fabric/mixin/renderer/client/MultipartBakedModelMixin.java
+index 8b68ff85300550588695f58b79027c5cd1d18cbb..e112770773e2a130f80f55edf9d3d61edbb79561 100644
+--- a/fabric-renderer-api-v1/src/client/java/net/fabricmc/fabric/mixin/renderer/client/MultipartBakedModelMixin.java
++++ b/fabric-renderer-api-v1/src/client/java/net/fabricmc/fabric/mixin/renderer/client/MultipartBakedModelMixin.java
+@@ -63,7 +63,7 @@ public class MultipartBakedModelMixin implements FabricBakedModel {
+ 	@Inject(at = @At("RETURN"), method = "<init>")
+ 	private void onInit(List<Pair<Predicate<BlockState>, BakedModel>> components, CallbackInfo cb) {
+ 		for (Pair<Predicate<BlockState>, BakedModel> component : components) {
+-			if (!component.getRight().isVanillaAdapter()) {
++			if (!((FabricBakedModel) component.getRight()).isVanillaAdapter()) {
+ 				isVanilla = false;
+ 				break;
+ 			}
+@@ -81,7 +81,7 @@ public class MultipartBakedModelMixin implements FabricBakedModel {
+ 				Pair<Predicate<BlockState>, BakedModel> pair = components.get(i);
+ 
+ 				if (pair.getLeft().test(state)) {
+-					pair.getRight().emitBlockQuads(blockView, state, pos, randomSupplier, context);
++					((FabricBakedModel) pair.getRight()).emitBlockQuads(blockView, state, pos, randomSupplier, context);
+ 					bitSet.set(i);
+ 				}
+ 			}
+@@ -89,7 +89,7 @@ public class MultipartBakedModelMixin implements FabricBakedModel {
+ 			stateCache.put(state, bitSet);
+ 		} else {
+ 			for (int i = 0; i < this.components.size(); i++) {
+-				if (bitSet.get(i)) components.get(i).getRight().emitBlockQuads(blockView, state, pos, randomSupplier, context);
++				if (bitSet.get(i)) ((FabricBakedModel) components.get(i).getRight()).emitBlockQuads(blockView, state, pos, randomSupplier, context);
+ 			}
+ 		}
+ 	}
+diff --git a/fabric-renderer-api-v1/src/client/java/net/fabricmc/fabric/mixin/renderer/client/WeightedBakedModelMixin.java b/fabric-renderer-api-v1/src/client/java/net/fabricmc/fabric/mixin/renderer/client/WeightedBakedModelMixin.java
+index 9729a9b81767b97f154d5e343a94661832464252..cedf365492aafc69e19b5ece187a8cdb0fd075c3 100644
+--- a/fabric-renderer-api-v1/src/client/java/net/fabricmc/fabric/mixin/renderer/client/WeightedBakedModelMixin.java
++++ b/fabric-renderer-api-v1/src/client/java/net/fabricmc/fabric/mixin/renderer/client/WeightedBakedModelMixin.java
+@@ -54,7 +54,7 @@ public class WeightedBakedModelMixin implements FabricBakedModel {
+ 	@Inject(at = @At("RETURN"), method = "<init>")
+ 	private void onInit(List<Weighted.Present<BakedModel>> models, CallbackInfo cb) {
+ 		for (int i = 0; i < models.size(); i++) {
+-			if (!models.get(i).getData().isVanillaAdapter()) {
++			if (!((FabricBakedModel) models.get(i).getData()).isVanillaAdapter()) {
+ 				isVanilla = false;
+ 				break;
+ 			}
+@@ -71,7 +71,7 @@ public class WeightedBakedModelMixin implements FabricBakedModel {
+ 		Weighted.Present<BakedModel> selected = Weighting.getAt(this.models, Math.abs((int) randomSupplier.get().nextLong()) % this.totalWeight).orElse(null);
+ 
+ 		if (selected != null) {
+-			selected.getData().emitBlockQuads(blockView, state, pos, randomSupplier, context);
++			((FabricBakedModel) selected.getData()).emitBlockQuads(blockView, state, pos, randomSupplier, context);
+ 		}
+ 	}
+ 
+@@ -80,7 +80,7 @@ public class WeightedBakedModelMixin implements FabricBakedModel {
+ 		Weighted.Present<BakedModel> selected = Weighting.getAt(this.models, Math.abs((int) randomSupplier.get().nextLong()) % this.totalWeight).orElse(null);
+ 
+ 		if (selected != null) {
+-			selected.getData().emitItemQuads(stack, randomSupplier, context);
++			((FabricBakedModel) selected.getData()).emitItemQuads(stack, randomSupplier, context);
+ 		}
+ 	}
+ }
+diff --git a/fabric-renderer-indigo/src/client/java/net/fabricmc/fabric/impl/client/indigo/renderer/render/BlockRenderContext.java b/fabric-renderer-indigo/src/client/java/net/fabricmc/fabric/impl/client/indigo/renderer/render/BlockRenderContext.java
+index 1d11314b80c7acdfa53135987f12e5ebcf60f930..e2244bb48ca017ed964041015c990daacf6bddf3 100644
+--- a/fabric-renderer-indigo/src/client/java/net/fabricmc/fabric/impl/client/indigo/renderer/render/BlockRenderContext.java
++++ b/fabric-renderer-indigo/src/client/java/net/fabricmc/fabric/impl/client/indigo/renderer/render/BlockRenderContext.java
+@@ -16,6 +16,8 @@
+ 
+ package net.fabricmc.fabric.impl.client.indigo.renderer.render;
+ 
++import net.fabricmc.fabric.api.renderer.v1.model.FabricBakedModel;
++
+ import net.minecraft.block.BlockState;
+ import net.minecraft.client.render.RenderLayer;
+ import net.minecraft.client.render.VertexConsumer;
+@@ -69,7 +71,7 @@ public class BlockRenderContext extends AbstractBlockRenderContext {
+ 		blockInfo.prepareForWorld(blockView, cull);
+ 		blockInfo.prepareForBlock(state, pos, model.useAmbientOcclusion());
+ 
+-		model.emitBlockQuads(blockView, state, pos, blockInfo.randomSupplier, this);
++		((FabricBakedModel) model).emitBlockQuads(blockView, state, pos, blockInfo.randomSupplier, this);
+ 
+ 		blockInfo.release();
+ 		blockInfo.random = null;
+diff --git a/fabric-renderer-indigo/src/client/java/net/fabricmc/fabric/impl/client/indigo/renderer/render/ItemRenderContext.java b/fabric-renderer-indigo/src/client/java/net/fabricmc/fabric/impl/client/indigo/renderer/render/ItemRenderContext.java
+index f42d5c7a41a0dd433728d56421a3fba5fe2341d6..bc47e9650f3e0049d736e73d85f918cc978d0ac9 100644
+--- a/fabric-renderer-indigo/src/client/java/net/fabricmc/fabric/impl/client/indigo/renderer/render/ItemRenderContext.java
++++ b/fabric-renderer-indigo/src/client/java/net/fabricmc/fabric/impl/client/indigo/renderer/render/ItemRenderContext.java
+@@ -19,6 +19,8 @@ package net.fabricmc.fabric.impl.client.indigo.renderer.render;
+ import java.util.List;
+ import java.util.function.Supplier;
+ 
++import net.fabricmc.fabric.api.renderer.v1.model.FabricBakedModel;
++
+ import org.jetbrains.annotations.Nullable;
+ 
+ import net.minecraft.block.BlockState;
+@@ -124,7 +126,7 @@ public class ItemRenderContext extends AbstractRenderContext {
+ 		matrix = matrixStack.peek().getPositionMatrix();
+ 		normalMatrix = matrixStack.peek().getNormalMatrix();
+ 
+-		model.emitItemQuads(itemStack, randomSupplier, this);
++		((FabricBakedModel) model).emitItemQuads(itemStack, randomSupplier, this);
+ 
+ 		this.itemStack = null;
+ 		this.matrixStack = null;
+diff --git a/fabric-renderer-indigo/src/client/java/net/fabricmc/fabric/impl/client/indigo/renderer/render/TerrainRenderContext.java b/fabric-renderer-indigo/src/client/java/net/fabricmc/fabric/impl/client/indigo/renderer/render/TerrainRenderContext.java
+index 2aa5e8f2cc7ae492219306762517fcba04d30a5b..c4faed5dd66c440afd5660228232dd61e00dcf8d 100644
+--- a/fabric-renderer-indigo/src/client/java/net/fabricmc/fabric/impl/client/indigo/renderer/render/TerrainRenderContext.java
++++ b/fabric-renderer-indigo/src/client/java/net/fabricmc/fabric/impl/client/indigo/renderer/render/TerrainRenderContext.java
+@@ -18,6 +18,8 @@ package net.fabricmc.fabric.impl.client.indigo.renderer.render;
+ 
+ import java.util.Set;
+ 
++import net.fabricmc.fabric.api.renderer.v1.model.FabricBakedModel;
++
+ import net.minecraft.block.BlockState;
+ import net.minecraft.client.render.OverlayTexture;
+ import net.minecraft.client.render.RenderLayer;
+@@ -95,7 +97,7 @@ public class TerrainRenderContext extends AbstractBlockRenderContext {
+ 
+ 			aoCalc.clear();
+ 			blockInfo.prepareForBlock(blockState, blockPos, model.useAmbientOcclusion());
+-			model.emitBlockQuads(blockInfo.blockView, blockInfo.blockState, blockInfo.blockPos, blockInfo.randomSupplier, this);
++			((FabricBakedModel) model).emitBlockQuads(blockInfo.blockView, blockInfo.blockState, blockInfo.blockPos, blockInfo.randomSupplier, this);
+ 		} catch (Throwable throwable) {
+ 			CrashReport crashReport = CrashReport.create(throwable, "Tessellating block in world - Indigo Renderer");
+ 			CrashReportSection crashReportSection = crashReport.addElement("Block being tessellated");
+diff --git a/fabric-renderer-indigo/src/client/java/net/fabricmc/fabric/mixin/client/indigo/renderer/BlockModelRendererMixin.java b/fabric-renderer-indigo/src/client/java/net/fabricmc/fabric/mixin/client/indigo/renderer/BlockModelRendererMixin.java
+index 69f7bb6ebdf1cc35cb3c40bcf56edf02e3578019..afb4b9b003a8adad49a340e381418a637e89c42c 100644
+--- a/fabric-renderer-indigo/src/client/java/net/fabricmc/fabric/mixin/client/indigo/renderer/BlockModelRendererMixin.java
++++ b/fabric-renderer-indigo/src/client/java/net/fabricmc/fabric/mixin/client/indigo/renderer/BlockModelRendererMixin.java
+@@ -16,6 +16,8 @@
+ 
+ package net.fabricmc.fabric.mixin.client.indigo.renderer;
+ 
++import net.fabricmc.fabric.api.renderer.v1.model.FabricBakedModel;
++
+ import org.spongepowered.asm.mixin.Mixin;
+ import org.spongepowered.asm.mixin.Unique;
+ import org.spongepowered.asm.mixin.injection.At;
+@@ -41,7 +43,7 @@ public abstract class BlockModelRendererMixin {
+ 
+ 	@Inject(at = @At("HEAD"), method = "render(Lnet/minecraft/world/BlockRenderView;Lnet/minecraft/client/render/model/BakedModel;Lnet/minecraft/block/BlockState;Lnet/minecraft/util/math/BlockPos;Lnet/minecraft/client/util/math/MatrixStack;Lnet/minecraft/client/render/VertexConsumer;ZLnet/minecraft/util/math/random/Random;JI)V", cancellable = true)
+ 	private void hookRender(BlockRenderView blockView, BakedModel model, BlockState state, BlockPos pos, MatrixStack matrix, VertexConsumer buffer, boolean cull, Random rand, long seed, int overlay, CallbackInfo ci) {
+-		if (!model.isVanillaAdapter()) {
++		if (!((FabricBakedModel) model).isVanillaAdapter()) {
+ 			BlockRenderContext context = fabric_contexts.get();
+ 			context.render(blockView, model, state, pos, matrix, buffer, cull, rand, seed, overlay);
+ 			ci.cancel();
+diff --git a/fabric-renderer-indigo/src/client/java/net/fabricmc/fabric/mixin/client/indigo/renderer/ChunkBuilderBuiltChunkRebuildTaskMixin.java b/fabric-renderer-indigo/src/client/java/net/fabricmc/fabric/mixin/client/indigo/renderer/ChunkBuilderBuiltChunkRebuildTaskMixin.java
+index 2dd82d37b1a50ee541417fdf6b72cd8f6629e201..2371ac9c15bcdb06cc200d4f19e7277705ec1e45 100644
+--- a/fabric-renderer-indigo/src/client/java/net/fabricmc/fabric/mixin/client/indigo/renderer/ChunkBuilderBuiltChunkRebuildTaskMixin.java
++++ b/fabric-renderer-indigo/src/client/java/net/fabricmc/fabric/mixin/client/indigo/renderer/ChunkBuilderBuiltChunkRebuildTaskMixin.java
+@@ -18,6 +18,8 @@ package net.fabricmc.fabric.mixin.client.indigo.renderer;
+ 
+ import java.util.Set;
+ 
++import net.fabricmc.fabric.api.renderer.v1.model.FabricBakedModel;
++
+ import org.spongepowered.asm.mixin.Final;
+ import org.spongepowered.asm.mixin.Mixin;
+ import org.spongepowered.asm.mixin.Shadow;
+@@ -106,7 +108,7 @@ public abstract class ChunkBuilderBuiltChunkRebuildTaskMixin {
+ 		if (blockState.getRenderType() == BlockRenderType.MODEL) {
+ 			final BakedModel model = renderManager.getModel(blockState);
+ 
+-			if (Indigo.ALWAYS_TESSELATE_INDIGO || !model.isVanillaAdapter()) {
++			if (Indigo.ALWAYS_TESSELATE_INDIGO || !((FabricBakedModel) model).isVanillaAdapter()) {
+ 				((AccessChunkRendererRegion) blockView).fabric_getRenderer().tessellateBlock(blockState, blockPos, model, matrix);
+ 				return;
+ 			}
+diff --git a/fabric-renderer-indigo/src/client/java/net/fabricmc/fabric/mixin/client/indigo/renderer/ItemRendererMixin.java b/fabric-renderer-indigo/src/client/java/net/fabricmc/fabric/mixin/client/indigo/renderer/ItemRendererMixin.java
+index 3b170efa93e3eaa38fa15230c3476e81d2e88cab..92738df60346529c7339428bd74a819ac32cbd16 100644
+--- a/fabric-renderer-indigo/src/client/java/net/fabricmc/fabric/mixin/client/indigo/renderer/ItemRendererMixin.java
++++ b/fabric-renderer-indigo/src/client/java/net/fabricmc/fabric/mixin/client/indigo/renderer/ItemRendererMixin.java
+@@ -16,6 +16,8 @@
+ 
+ package net.fabricmc.fabric.mixin.client.indigo.renderer;
+ 
++import net.fabricmc.fabric.api.renderer.v1.model.FabricBakedModel;
++
+ import org.spongepowered.asm.mixin.Final;
+ import org.spongepowered.asm.mixin.Mixin;
+ import org.spongepowered.asm.mixin.Shadow;
+@@ -50,7 +52,7 @@ public abstract class ItemRendererMixin {
+ 
+ 	@Inject(at = @At(value = "INVOKE", target = "Lnet/minecraft/client/render/model/BakedModel;isBuiltin()Z"), method = "renderItem(Lnet/minecraft/item/ItemStack;Lnet/minecraft/client/render/model/json/ModelTransformationMode;ZLnet/minecraft/client/util/math/MatrixStack;Lnet/minecraft/client/render/VertexConsumerProvider;IILnet/minecraft/client/render/model/BakedModel;)V", cancellable = true)
+ 	public void hook_renderItem(ItemStack stack, ModelTransformationMode transformMode, boolean invert, MatrixStack matrixStack, VertexConsumerProvider vertexConsumerProvider, int light, int overlay, BakedModel model, CallbackInfo ci) {
+-		if (!model.isVanillaAdapter()) {
++		if (!((FabricBakedModel) model).isVanillaAdapter()) {
+ 			fabric_contexts.get().renderModel(stack, transformMode, invert, matrixStack, vertexConsumerProvider, light, overlay, model, fabric_vanillaHandler);
+ 			matrixStack.pop();
+ 			ci.cancel();
+diff --git a/fabric-screen-handler-api-v1/src/main/java/net/fabricmc/fabric/mixin/screenhandler/ServerPlayerEntityMixin.java b/fabric-screen-handler-api-v1/src/main/java/net/fabricmc/fabric/mixin/screenhandler/ServerPlayerEntityMixin.java
+index c6fb3e591115062c1035cc33308e0398309f959a..30a8513b48082338c80b2e2b5daa3de98467de39 100644
+--- a/fabric-screen-handler-api-v1/src/main/java/net/fabricmc/fabric/mixin/screenhandler/ServerPlayerEntityMixin.java
++++ b/fabric-screen-handler-api-v1/src/main/java/net/fabricmc/fabric/mixin/screenhandler/ServerPlayerEntityMixin.java
+@@ -20,6 +20,9 @@ import java.util.Objects;
+ import java.util.OptionalInt;
+ 
+ import com.mojang.authlib.GameProfile;
++
++import net.fabricmc.fabric.api.screenhandler.v1.FabricScreenHandlerFactory;
++
+ import org.spongepowered.asm.mixin.Mixin;
+ import org.spongepowered.asm.mixin.Shadow;
+ import org.spongepowered.asm.mixin.injection.At;
+@@ -58,7 +61,7 @@ public abstract class ServerPlayerEntityMixin extends PlayerEntity {
+ 
+ 	@Redirect(method = "openHandledScreen(Lnet/minecraft/screen/NamedScreenHandlerFactory;)Ljava/util/OptionalInt;", at = @At(value = "INVOKE", target = "Lnet/minecraft/server/network/ServerPlayerEntity;closeHandledScreen()V"))
+ 	private void fabric_closeHandledScreenIfAllowed(ServerPlayerEntity player, NamedScreenHandlerFactory factory) {
+-		if (factory.shouldCloseCurrentScreen()) {
++		if (((FabricScreenHandlerFactory) factory).shouldCloseCurrentScreen()) {
+ 			this.closeHandledScreen();
+ 		} else {
+ 			// Called by closeHandledScreen in vanilla
