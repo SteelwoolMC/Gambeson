@@ -1,0 +1,18 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CursedFlames <18627001+CursedFlames@users.noreply.github.com>
+Date: Tue, 11 Jul 2023 19:09:44 +1200
+Subject: [PATCH] pack.mcmeta
+
+
+diff --git a/src/main/resources/pack.mcmeta b/src/main/resources/pack.mcmeta
+new file mode 100644
+index 0000000000000000000000000000000000000000..f15ee0d12bc39dce745a24292cc27b4373a22b20
+--- /dev/null
++++ b/src/main/resources/pack.mcmeta
+@@ -0,0 +1,6 @@
++{
++	"pack": {
++		"description": "gambeson",
++		"pack_format": 8
++	}
++}

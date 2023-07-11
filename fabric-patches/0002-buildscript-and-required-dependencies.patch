@@ -1,0 +1,156 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CursedFlames <18627001+CursedFlames@users.noreply.github.com>
+Date: Tue, 11 Jul 2023 19:09:32 +1200
+Subject: [PATCH] buildscript and required dependencies
+
+
+diff --git a/build.gradle b/build.gradle
+new file mode 100644
+index 0000000000000000000000000000000000000000..0210653988691ce1c0764ce96995707e1081314b
+--- /dev/null
++++ b/build.gradle
+@@ -0,0 +1,109 @@
++plugins {
++	id "java"
++	id "dev.architectury.loom" version "1.2.+"
++}
++
++subprojects {
++	// Combine all child resources into the root project
++	if (project.name == "deprecated") return
++	var name = project.name
++	if (project.parent.name == "deprecated") name = "deprecated/" + name
++	sourceSets.main.java.srcDirs(name+"/src/main/java", name+"/src/client/java")
++	sourceSets.main.resources.srcDirs(name+"/src/main/resources", name+"/src/client/resources")
++}
++
++var mergedAccessWidener = "$project.buildDir/merged.accesswidener"
++
++// Concatenate together all access wideners, since loom only takes a single file.
++// TODO this is kind of awkward since it's a task that needs to run, but the AW file is needed when the buildscript is processed,
++//      before the task can run. To deal with this we run without an AW the first time, meaning the first build will fail.
++tasks.register("concatAccessWideners") {
++	inputs.files(sourceSets.main.resources.files.stream().filter(file -> file.name.endsWith("accesswidener")).findAll())
++	outputs.file(mergedAccessWidener)
++
++	doLast {
++		outputs.files.singleFile.withOutputStream { out ->
++			out << "accessWidener v2 named\n"
++			for (file in inputs.files) {
++				file.eachLine {
++					if (it.startsWith("accessWidener")) return
++					out << it << "\n"
++				}
++			}
++		}
++	}
++}
++
++compileJava.dependsOn("concatAccessWideners")
++validateAccessWidener.dependsOn("concatAccessWideners")
++
++loom {
++	// Builds will fail without the AW, but concatAccessWideners will run to generate it
++	if (file(mergedAccessWidener).exists()) {
++		accessWidenerPath = file(mergedAccessWidener)
++	}
++}
++
++dependencies {
++	minecraft "com.mojang:minecraft:$rootProject.minecraft_version"
++	mappings "net.fabricmc:yarn:${rootProject.minecraft_version}${project.yarn_version}:v2"
++	modApi "net.fabricmc:fabric-loader:${project.loader_version}"
++	forge "net.minecraftforge:forge:${rootProject.minecraft_version}-${rootProject.forge_version}"
++	implementation("net.fabricmc:sponge-mixin:${rootProject.gambeson_replacement_mixin_version}")
++
++	// TODO I'm not sure if this substitution actually works?
++	//      even if it does, we're still missing interface mixins to non-interface classes
++	modules {
++		module("dev.architectury:mixin-patched") {
++			replacedBy("net.fabricmc:sponge-mixin", "Replace arch mixin with fabric mixin as otherwise some mixins break")
++		}
++	}
++}
++
++base {
++	archivesName = "gambeson"
++}
++
++loom {
++	mods {
++		"fabric-api" {
++			sourceSet sourceSets.main
++		}
++	}
++}
++
++// Not sure if this one is necessary
++tasks.withType(Copy) {
++	filesMatching("fabric.mod.json") {
++		duplicatesStrategy DuplicatesStrategy.EXCLUDE
++	}
++}
++
++tasks.withType(Jar) {
++	// Ignore the `fabric.mod.json`s of child mods
++	filesMatching("fabric.mod.json") {
++		duplicatesStrategy DuplicatesStrategy.EXCLUDE
++	}
++}
++
++processResources {
++	inputs.property "version", project.version
++
++	filesMatching("fabric.mod.json") {
++		expand "version": project.version
++	}
++}
++
++tasks.withType(JavaCompile).configureEach {
++	it.options.release = 17
++}
++
++java {
++	// Loom will automatically attach sourcesJar to a RemapSourcesJar task and to the "build" task
++	// if it is present.
++	// If you remove this line, sources will not be generated.
++	withSourcesJar()
++
++	sourceCompatibility = JavaVersion.VERSION_17
++	targetCompatibility = JavaVersion.VERSION_17
++}
+diff --git a/gradle.properties b/gradle.properties
+index 62ed69f1056deb5afac64f2257b9a13aef7d07d0..34220dbb45327361f44dbf5672139780bb6dfed1 100644
+--- a/gradle.properties
++++ b/gradle.properties
+@@ -10,6 +10,11 @@ installer_version=0.11.1
+ 
+ prerelease=false
+ 
++# gambeson: forge dependency
++loom.platform=forge
++forge_version=47.1.0
++gambeson_replacement_mixin_version=0.12.5+mixin.0.8.5
++
+ # Do not manually update, use the bumpversions task:
+ fabric-api-base-version=0.4.29
+ fabric-api-lookup-api-v1-version=1.6.34
+diff --git a/settings.gradle b/settings.gradle
+index daeff6014f6bda6611e8d63566104fe1534b0b34..917a95ead0226b5add84496c505f873be6efeacc 100644
+--- a/settings.gradle
++++ b/settings.gradle
+@@ -5,6 +5,14 @@ pluginManagement {
+ 			name = 'Fabric'
+ 			url = 'https://maven.fabricmc.net/'
+ 		}
++		maven {
++			name = "Architectury"
++			url = "https://maven.architectury.dev/"
++		}
++		maven {
++			name = "Forge"
++			url = "https://files.minecraftforge.net/maven/"
++		}
+ 		mavenLocal()
+ 	}
+ }

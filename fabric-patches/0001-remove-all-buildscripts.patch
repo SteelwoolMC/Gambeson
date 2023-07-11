@@ -1,0 +1,2029 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CursedFlames <18627001+CursedFlames@users.noreply.github.com>
+Date: Tue, 11 Jul 2023 19:08:44 +1200
+Subject: [PATCH] remove all buildscripts
+
+
+diff --git a/build.gradle b/build.gradle
+deleted file mode 100644
+index ca0e80d7ab715b513eb151345525fd77337b309c..0000000000000000000000000000000000000000
+--- a/build.gradle
++++ /dev/null
+@@ -1,817 +0,0 @@
+-buildscript {
+-	dependencies {
+-		classpath 'org.kohsuke:github-api:1.135'
+-	}
+-}
+-
+-plugins {
+-	id "java-library"
+-	id "eclipse"
+-	id "idea"
+-	id "maven-publish"
+-	id 'jacoco'
+-	id "fabric-loom" version "1.2.7" apply false
+-	id "com.diffplug.spotless" version "6.18.0"
+-	id "org.ajoberstar.grgit" version "3.1.0"
+-	id "com.matthewprenger.cursegradle" version "1.4.0"
+-	id "com.modrinth.minotaur" version "2.4.3"
+-	id "me.modmuss50.remotesign" version "0.4.0" apply false
+-}
+-
+-def ENV = System.getenv()
+-def signingEnabled = ENV.SIGNING_SERVER
+-
+-version = project.version + "+" + (ENV.GITHUB_RUN_NUMBER ? "" : "local-") + getBranch()
+-logger.lifecycle("Building Fabric: " + version)
+-
+-
+-import net.fabricmc.loom.util.gradle.SourceSetHelper
+-import groovy.json.JsonSlurper
+-import org.apache.commons.codec.digest.DigestUtils
+-
+-def getSubprojectVersion(project) {
+-	// Get the version from the gradle.properties file
+-	def version = project.properties["${project.name}-version"]
+-
+-	if (!version) {
+-		throw new NullPointerException("Could not find version for " + project.name)
+-	}
+-
+-	if (grgit == null) {
+-		return version + "+nogit"
+-	}
+-
+-	def latestCommits = grgit.log(paths: [project.name], maxCommits: 1)
+-
+-	if (latestCommits.isEmpty()) {
+-		return version + "+uncommited"
+-	}
+-
+-	return version + "+" + latestCommits.get(0).id.substring(0, 8) + DigestUtils.sha256Hex(project.rootProject.minecraft_version).substring(0, 2)
+-}
+-
+-def getBranch() {
+-	def ENV = System.getenv()
+-	if (ENV.GITHUB_REF) {
+-		def branch = ENV.GITHUB_REF
+-		return branch.substring(branch.lastIndexOf("/") + 1)
+-	}
+-
+-	if (grgit == null) {
+-		return "unknown"
+-	}
+-
+-	def branch = grgit.branch.current().name
+-	return branch.substring(branch.lastIndexOf("/") + 1)
+-}
+-
+-def moduleDependencies(project, List<String> depNames) {
+-	def deps = depNames.iterator().collect { project.dependencies.project(path: ":$it", configuration: 'namedElements') }
+-	def clientOutputs = depNames.iterator().collect { findProject(":$it").sourceSets.client.output }
+-
+-	project.dependencies {
+-		deps.each {
+-			api it
+-		}
+-
+-		clientOutputs.each {
+-			clientImplementation it
+-		}
+-	}
+-
+-	// As we manually handle the maven artifacts, we need to also manually specify the deps.
+-	project.publishing {
+-		publications {
+-			mavenJava(MavenPublication) {
+-				pom.withXml {
+-					def depsNode = asNode().appendNode("dependencies")
+-					deps.each {
+-						def depNode = depsNode.appendNode("dependency")
+-						depNode.appendNode("groupId", it.group)
+-						depNode.appendNode("artifactId", it.name)
+-						depNode.appendNode("version", it.version)
+-						depNode.appendNode("scope", "compile")
+-					}
+-				}
+-			}
+-		}
+-	}
+-}
+-
+-def testDependencies(project, List<String> depNames) {
+-	def deps = depNames.iterator().collect { project.dependencies.project(path: ":$it", configuration: 'namedElements') }
+-	def clientOutputs = depNames.iterator().collect { findProject(":$it").sourceSets.client.output }
+-
+-	project.dependencies {
+-		deps.each {
+-			testmodImplementation it
+-		}
+-
+-		clientOutputs.each {
+-			testmodClientImplementation it
+-		}
+-	}
+-}
+-
+-allprojects {
+-	group = "net.fabricmc.fabric-api"
+-
+-	apply plugin: "maven-publish"
+-	apply plugin: "me.modmuss50.remotesign"
+-
+-	tasks.withType(GenerateModuleMetadata) {
+-		enabled = false
+-	}
+-
+-	if (signingEnabled) {
+-		remoteSign {
+-			requestUrl = ENV.SIGNING_SERVER
+-			pgpAuthKey = ENV.SIGNING_PGP_KEY
+-			jarAuthKey = ENV.SIGNING_JAR_KEY
+-
+-			afterEvaluate {
+-				// PGP sign all maven publications.
+-				sign publishing.publications.mavenJava
+-			}
+-		}
+-	}
+-
+-	publishing {
+-		setupRepositories(repositories)
+-	}
+-
+-	if (it.name == "deprecated") {
+-		return
+-	}
+-
+-	apply plugin: "java-library"
+-	apply plugin: "checkstyle"
+-	apply plugin: "fabric-loom"
+-	apply plugin: "com.diffplug.spotless"
+-
+-	tasks.withType(JavaCompile).configureEach {
+-		it.options.release = 17
+-	}
+-
+-	java {
+-		// Must be added before the split source sets are setup.
+-		withSourcesJar()
+-	}
+-
+-	loom {
+-		splitEnvironmentSourceSets()
+-	}
+-
+-	sourceSets {
+-		testmod {
+-			compileClasspath += main.compileClasspath
+-			runtimeClasspath += main.runtimeClasspath
+-		}
+-
+-		testmodClient {
+-			compileClasspath += main.compileClasspath
+-			runtimeClasspath += main.runtimeClasspath
+-			compileClasspath += client.compileClasspath
+-			runtimeClasspath += client.runtimeClasspath
+-
+-			compileClasspath += testmod.compileClasspath
+-			runtimeClasspath += testmod.runtimeClasspath
+-		}
+-
+-		test {
+-			compileClasspath += testmodClient.compileClasspath
+-			runtimeClasspath += testmodClient.runtimeClasspath
+-		}
+-	}
+-
+-	loom {
+-		runtimeOnlyLog4j = true
+-
+-		runs {
+-			testmodClient {
+-				client()
+-				ideConfigGenerated project.rootProject == project
+-				name = "Testmod Client"
+-				source sourceSets.testmodClient
+-			}
+-			testmodServer {
+-				server()
+-				ideConfigGenerated project.rootProject == project
+-				name = "Testmod Server"
+-				source sourceSets.testmod
+-			}
+-		}
+-	}
+-
+-	allprojects.each { p ->
+-		if (project.name == "deprecated") {
+-			return
+-		}
+-
+-		loom.mods.register(p.name) {
+-			sourceSet p.sourceSets.main
+-			sourceSet p.sourceSets.client
+-		}
+-
+-		loom.mods.register(p.name + "-testmod") {
+-			sourceSet p.sourceSets.testmod
+-			sourceSet p.sourceSets.testmodClient
+-		}
+-	}
+-
+-	dependencies {
+-		minecraft "com.mojang:minecraft:$rootProject.minecraft_version"
+-		mappings "net.fabricmc:yarn:${rootProject.minecraft_version}${project.yarn_version}:v2"
+-		modApi "net.fabricmc:fabric-loader:${project.loader_version}"
+-
+-		testmodImplementation sourceSets.main.output
+-		testmodClientImplementation sourceSets.main.output
+-		testmodClientImplementation sourceSets.client.output
+-		testmodClientImplementation sourceSets.testmod.output
+-
+-		testImplementation "net.fabricmc:fabric-loader-junit:${project.loader_version}"
+-		testImplementation sourceSets.testmodClient.output
+-	}
+-
+-	test {
+-		useJUnitPlatform()
+-
+-		afterEvaluate {
+-			// See: https://github.com/FabricMC/fabric-loader/pull/585
+-			def classPathGroups = loom.mods.stream()
+-					.map { modSettings ->
+-						SourceSetHelper.getClasspath(modSettings, getProject()).stream()
+-								.map(File.&getAbsolutePath)
+-								.collect(Collectors.joining(File.pathSeparator))
+-					}
+-					.collect(Collectors.joining(File.pathSeparator+File.pathSeparator))
+-
+-			systemProperty("fabric.classPathGroups", classPathGroups)
+-		}
+-	}
+-
+-	tasks.withType(ProcessResources).configureEach {
+-		inputs.property "version", project.version
+-
+-		filesMatching("fabric.mod.json") {
+-			expand "version": project.version
+-		}
+-	}
+-
+-	spotless {
+-		java {
+-			licenseHeaderFile(rootProject.file("HEADER"))
+-		}
+-	}
+-
+-	checkstyle {
+-		configFile = rootProject.file("checkstyle.xml")
+-		toolVersion = "10.11.0"
+-	}
+-
+-	tasks.withType(AbstractArchiveTask).configureEach {
+-		preserveFileTimestamps = false
+-		reproducibleFileOrder = true
+-	}
+-
+-	if (signingEnabled) {
+-		remoteSign {
+-			sign remapJar
+-		}
+-	}
+-
+-	// Run this task after updating minecraft to regenerate any required resources
+-	tasks.register('generateResources') {
+-		group = "fabric"
+-	}
+-
+-	tasks.register('testmodJar', Jar) {
+-		from sourceSets.testmod.output
+-		from sourceSets.testmodClient.output
+-		destinationDirectory = new File(project.buildDir, "devlibs")
+-		archiveClassifier = "testmod"
+-	}
+-
+-	[jar, sourcesJar].each {
+-		it.from(rootProject.file("LICENSE")) {
+-			rename { "${it}-${project.base.archivesName.get()}"}
+-		}
+-	}
+-
+-	if (file("src/client").exists() && !file("src/main").exists()) {
+-		remapJar {
+-			additionalClientOnlyEntries.add("LICENSE-${project.base.archivesName.get()}")
+-		}
+-
+-		remapSourcesJar {
+-			additionalClientOnlyEntries.add("LICENSE-${project.base.archivesName.get()}")
+-		}
+-	}
+-
+-	tasks.register('remapTestmodJar', net.fabricmc.loom.task.RemapJarTask) {
+-		dependsOn testmodJar
+-		input = testmodJar.archiveFile
+-		archiveClassifier = "testmod"
+-		addNestedDependencies = false
+-		includesClientOnlyClasses = true
+-		clientOnlySourceSetName = sourceSets.testmodClient.name
+-	}
+-	build.dependsOn remapTestmodJar
+-
+-	tasks.register('validateMixinNames', net.fabricmc.loom.task.ValidateMixinNameTask) {
+-		source(sourceSets.main.output)
+-		source(sourceSets.client.output)
+-		source(sourceSets.testmod.output)
+-	}
+-
+-	// Apply to each valid subproject.
+-	apply from: rootProject.file('gradle/package-info.gradle')
+-	apply from: rootProject.file('gradle/validate-annotations.gradle')
+-}
+-
+-remapTestmodJar {
+-	def testModJarTasks = []
+-
+-	subprojects {
+-		if (it.name == "deprecated" || !(it.file("src/testmod").exists() || it.file("src/testmodClient").exists())) {
+-			return
+-		}
+-
+-		testModJarTasks += it.tasks.remapTestmodJar
+-	}
+-
+-	nestedJars.setFrom(testModJarTasks)
+-	addNestedDependencies = true
+-	clientOnlySourceSetName = sourceSets.testmodClient.name
+-}
+-
+-// Apply auxiliary buildscripts to submodules
+-// This must be done after all plugins are applied to subprojects
+-apply from: "gradle/module-validation.gradle"
+-apply from: "gradle/module-versioning.gradle"
+-
+-loom {
+-	// Required as the item-group API uses access widened classes in its API, without this the javadoc generation fails.
+-	accessWidenerPath = file("fabric-item-group-api-v1/src/main/resources/fabric-item-group-api-v1.accesswidener")
+-}
+-
+-javadoc {
+-	options {
+-		source = "17"
+-		encoding = "UTF-8"
+-		charSet = "UTF-8"
+-		memberLevel = JavadocMemberLevel.PACKAGE
+-		links(
+-				"https://maven.fabricmc.net/docs/yarn-${rootProject.minecraft_version}${project.yarn_version}/"
+-				)
+-		// Disable the crazy super-strict doclint tool in Java 8
+-		addStringOption("Xdoclint:none", "-quiet")
+-
+-		tags(
+-				'apiNote:a:API Note:',
+-				'implSpec:a:Implementation Requirements:',
+-				'implNote:a:Implementation Note:'
+-				)
+-	}
+-
+-	allprojects.each {
+-		if (it.name == "deprecated") {
+-			return
+-		}
+-
+-		source(it.sourceSets.main.allJava)
+-		source(it.sourceSets.client.allJava)
+-	}
+-
+-	classpath = files(sourceSets.main.compileClasspath, sourceSets.client.compileClasspath)
+-	include("**/api/**")
+-	failOnError true
+-}
+-
+-tasks.register('javadocJar', Jar) {
+-	dependsOn javadoc
+-	from javadoc.destinationDir
+-	//Set as `fatjavadoc` to prevent an ide form trying to use this javadoc, over using the modules javadoc
+-	archiveClassifier = "fatjavadoc"
+-}
+-
+-build.dependsOn javadocJar
+-
+-loom {
+-	runs {
+-		gametest {
+-			inherit testmodServer
+-
+-			name "Game Test"
+-
+-			// Enable the gametest runner
+-			vmArg "-Dfabric-api.gametest"
+-			vmArg "-Dfabric-api.gametest.report-file=${project.buildDir}/junit.xml"
+-			runDir "build/gametest"
+-		}
+-		autoTestServer {
+-			inherit testmodServer
+-			name "Auto Test Server"
+-			vmArg "-Dfabric.autoTest"
+-		}
+-		autoTestClient {
+-			inherit testmodClient
+-			name "Auto Test Client"
+-			vmArg "-Dfabric.autoTest"
+-		}
+-
+-		// Create duplicate tasks for this, as jacoco slows things down a bit
+-		gametestCoverage {
+-			inherit gametest
+-			name "Game Test Coverage"
+-			ideConfigGenerated = false
+-		}
+-
+-		autoTestClientCoverage {
+-			inherit autoTestClient
+-			name "Auto Test Client Coverage"
+-			ideConfigGenerated = false
+-		}
+-	}
+-}
+-test.dependsOn runGametest
+-
+-def coverageTasks = [
+-	runGametestCoverage,
+-	runAutoTestClientCoverage
+-]
+-
+-jacoco {
+-	coverageTasks.forEach {
+-		applyTo it
+-	}
+-}
+-
+-tasks.register('coverage', JacocoReport) {
+-	dependsOn coverageTasks
+-	coverageTasks.forEach {
+-		executionData it
+-	}
+-
+-	// Add all source as input
+-	allprojects { p ->
+-		if (p.path.startsWith(":deprecated")) {
+-			return
+-		}
+-		sourceSets p.sourceSets.main, p.sourceSets.client, p.sourceSets.testmod, p.sourceSets.testmodClient
+-	}
+-
+-	// Exclude mixins
+-	classDirectories.setFrom(files(classDirectories.files.collect {
+-		fileTree(dir: it, exclude: '**/mixin/**')
+-	}))
+-}
+-
+-configurations {
+-	productionRuntime {
+-		extendsFrom configurations.minecraftLibraries
+-		extendsFrom configurations.loaderLibraries
+-		extendsFrom configurations.minecraftRuntimeLibraries
+-	}
+-	productionRuntimeServer
+-}
+-
+-dependencies {
+-	productionRuntime "net.fabricmc:fabric-loader:${project.loader_version}"
+-	productionRuntime "net.fabricmc:intermediary:${project.minecraft_version}"
+-
+-	productionRuntimeServer "net.fabricmc:fabric-installer:${project.installer_version}:server"
+-}
+-
+-import net.fabricmc.loom.util.Platform
+-
+-// This is very far beyond loom's API if you copy this, you're on your own.
+-tasks.register('runProductionAutoTestClient', JavaExec) {
+-	dependsOn remapJar, remapTestmodJar, downloadAssets
+-	classpath.from configurations.productionRuntime
+-	mainClass = "net.fabricmc.loader.impl.launch.knot.KnotClient"
+-	workingDir = file("run")
+-
+-	doFirst {
+-		classpath.from loom.minecraftProvider.minecraftClientJar
+-		workingDir.mkdirs()
+-
+-		args(
+-				"--assetIndex", loom.minecraftProvider.versionInfo.assetIndex().fabricId(loom.minecraftProvider.minecraftVersion()),
+-				"--assetsDir", new File(loom.files.userCache, "assets").absolutePath,
+-				"--gameDir", workingDir.absolutePath
+-				)
+-
+-		if (Platform.CURRENT.operatingSystem.isMacOS()) {
+-			jvmArgs(
+-					"-XstartOnFirstThread"
+-					)
+-		}
+-
+-		jvmArgs(
+-				"-Dfabric.addMods=${remapJar.archiveFile.get().asFile.absolutePath}${File.pathSeparator}${remapTestmodJar.archiveFile.get().asFile.absolutePath}",
+-				"-Dfabric.autoTest"
+-				)
+-	}
+-}
+-
+-tasks.register('serverPropertiesJar', Jar) {
+-	def propsFile = file("build/tmp/install.properties")
+-
+-	doFirst {
+-		propsFile.text = """\
+-						fabric-loader-version=${project.loader_version}
+-						game-version=${project.minecraft_version}
+-						""".stripMargin().stripIndent()
+-	}
+-
+-	archiveFileName = "test-server-properties.jar"
+-	destinationDirectory = file("build/tmp")
+-	from(propsFile)
+-}
+-
+-tasks.register('runProductionAutoTestServer', JavaExec) {
+-	dependsOn remapJar, remapTestmodJar, serverPropertiesJar
+-	classpath.from configurations.productionRuntimeServer, serverPropertiesJar
+-	mainClass = "net.fabricmc.installer.ServerLauncher"
+-	workingDir = file("run")
+-
+-	doFirst {
+-		workingDir.mkdirs()
+-
+-		jvmArgs(
+-				"-Dfabric.addMods=${remapJar.archiveFile.get().asFile.absolutePath}${File.pathSeparator}${remapTestmodJar.archiveFile.get().asFile.absolutePath}",
+-				"-Dfabric.autoTest"
+-				)
+-
+-		args("nogui")
+-	}
+-}
+-
+-// Format all the gradle files
+-spotless {
+-	groovyGradle {
+-		target 'src/**/*.gradle', '*.gradle', 'gradle/*.gradle'
+-		greclipse()
+-	}
+-}
+-
+-def addPomMetadataInformation(Project project, MavenPom pom) {
+-	def modJsonFile = project.file("src/main/resources/fabric.mod.json")
+-
+-	if (!modJsonFile.exists()) {
+-		modJsonFile = project.file("src/client/resources/fabric.mod.json")
+-	}
+-
+-	def modJson = new JsonSlurper().parse(modJsonFile)
+-	pom.name = modJson.name
+-	pom.url = "https://github.com/FabricMC/fabric/tree/HEAD/${project.rootDir.relativePath(project.projectDir)}"
+-	pom.description = modJson.description
+-	pom.licenses {
+-		license {
+-			name = "Apache-2.0"
+-			url = "https://github.com/FabricMC/fabric/blob/HEAD/LICENSE"
+-		}
+-	}
+-	pom.developers {
+-		developer {
+-			name = "FabricMC"
+-			url = "https://fabricmc.net/"
+-		}
+-	}
+-	pom.scm {
+-		connection = "scm:git:https://github.com/FabricMC/fabric.git"
+-		url = "https://github.com/FabricMC/fabric"
+-		developerConnection = "scm:git:git@github.com:FabricMC/fabric.git"
+-	}
+-	pom.issueManagement {
+-		system = "GitHub"
+-		url = "https://github.com/FabricMC/fabric/issues"
+-	}
+-}
+-
+-subprojects {
+-	if (it.name == "deprecated") {
+-		return
+-	}
+-
+-	dependencies {
+-		testmodImplementation sourceSets.main.output
+-
+-		// Make all modules depend on the gametest api (and thus res loader) to try and promote its usage.
+-		if (project.name != "fabric-gametest-api-v1") {
+-			testmodImplementation project(path: ':fabric-gametest-api-v1', configuration: 'namedElements')
+-			testmodClientImplementation project(":fabric-gametest-api-v1").sourceSets.client.output
+-			testmodImplementation project(path: ':fabric-resource-loader-v0', configuration: 'namedElements')
+-			testmodClientImplementation project(":fabric-resource-loader-v0").sourceSets.client.output
+-		}
+-
+-		// Make all testmods run with registry-sync-v0 as it is required to register new objects.
+-		if (project.name != "fabric-registry-sync-v0") {
+-			testmodRuntimeOnly project(path: ':fabric-registry-sync-v0', configuration: 'namedElements')
+-			testmodClientImplementation project(":fabric-registry-sync-v0").sourceSets.client.output
+-		}
+-	}
+-
+-	publishing {
+-		publications {
+-			mavenJava(MavenPublication) {
+-				pom {
+-					addPomMetadataInformation(project, pom)
+-				}
+-				artifact(signingEnabled ? signRemapJar.output : remapJar) {
+-					builtBy(signingEnabled ? signRemapJar : remapJar)
+-				}
+-
+-				artifact(remapSourcesJar) {
+-					builtBy remapSourcesJar
+-				}
+-			}
+-		}
+-	}
+-
+-	// We manually handle the pom generation
+-	loom.disableDeprecatedPomGeneration(publishing.publications.mavenJava)
+-
+-	javadoc.enabled = false
+-}
+-
+-publishing {
+-	publications {
+-		mavenJava(MavenPublication) {
+-			artifact(signingEnabled ? signRemapJar.output : remapJar) {
+-				builtBy(signingEnabled ? signRemapJar : remapJar)
+-			}
+-
+-			artifact(sourcesJar) {
+-				builtBy remapSourcesJar
+-			}
+-
+-			artifact javadocJar
+-			artifact remapTestmodJar
+-
+-			pom {
+-				addPomMetadataInformation(rootProject, pom)
+-			}
+-
+-			pom.withXml {
+-				def depsNode = asNode().appendNode("dependencies")
+-				subprojects.each {
+-					// Dont depend on the deprecated modules in the main artifact.
+-					if (it.path.startsWith(":deprecated")) {
+-						return
+-					}
+-
+-					def depNode = depsNode.appendNode("dependency")
+-					depNode.appendNode("groupId", it.group)
+-					depNode.appendNode("artifactId", it.name)
+-					depNode.appendNode("version", it.version)
+-					depNode.appendNode("scope", "compile")
+-				}
+-			}
+-		}
+-	}
+-}
+-
+-// Required until the deprecation is removed. Fabric API's main jar that is published to maven does not contain sub modules.
+-loom.disableDeprecatedPomGeneration(publishing.publications.mavenJava)
+-
+-void setupRepositories(RepositoryHandler repositories) {
+-	//repositories.mavenLocal() // uncomment for testing
+-	def ENV = System.getenv()
+-	if (ENV.MAVEN_URL) {
+-		repositories.maven {
+-			url ENV.MAVEN_URL
+-			if (ENV.MAVEN_USERNAME) {
+-				credentials {
+-					username ENV.MAVEN_USERNAME
+-					password ENV.MAVEN_PASSWORD
+-				}
+-			}
+-		}
+-	}
+-}
+-
+-subprojects.each {
+-	if (it.name == "deprecated") {
+-		return
+-	}
+-
+-	remapJar.dependsOn("${it.path}:remapJar")
+-}
+-
+-// These modules are not included in the fat jar, maven will resolve them via the pom.
+-def devOnlyModules = ["fabric-gametest-api-v1",]
+-
+-dependencies {
+-	afterEvaluate {
+-		subprojects.each {
+-			if (it.name == "deprecated") {
+-				return
+-			}
+-
+-			api project(path: "${it.path}", configuration: "namedElements")
+-			clientImplementation project("${it.path}:").sourceSets.client.output
+-
+-			testmodImplementation project("${it.path}:").sourceSets.testmod.output
+-			testmodClientImplementation project("${it.path}:").sourceSets.testmodClient.output
+-		}
+-	}
+-}
+-
+-remapJar {
+-	afterEvaluate {
+-		subprojects.each {
+-			if (it.name in devOnlyModules || it.name == "deprecated") {
+-				return
+-			}
+-
+-			// Include the signed or none signed jar from the sub project.
+-			nestedJars.from project("${it.path}").tasks.getByName(signingEnabled ? "signRemapJar" : "remapJar")
+-		}
+-	}
+-}
+-
+-curseforge {
+-	if (ENV.CURSEFORGE_API_KEY) {
+-		apiKey = ENV.CURSEFORGE_API_KEY
+-	}
+-
+-	project {
+-		id = "306612"
+-		changelog = ENV.CHANGELOG ?: "No changelog provided"
+-		releaseType = project.prerelease == "true" ? "beta" : "release"
+-		addGameVersion "1.20.1"
+-		addGameVersion "Fabric"
+-
+-		mainArtifact(signingEnabled ? signRemapJar.output : remapJar) {
+-			displayName = "[$project.minecraft_version] Fabric API $project.version"
+-		}
+-
+-		afterEvaluate {
+-			uploadTask.dependsOn("remapJar")
+-		}
+-	}
+-
+-	options {
+-		forgeGradleIntegration = false
+-	}
+-}
+-
+-if (signingEnabled) {
+-	project.tasks.curseforge.dependsOn signRemapJar
+-	project.tasks.modrinth.dependsOn signRemapJar
+-	build.dependsOn signRemapJar
+-}
+-
+-import org.kohsuke.github.GHReleaseBuilder
+-import org.kohsuke.github.GitHub
+-
+-import java.util.stream.Collectors
+-
+-tasks.register('github') {
+-	dependsOn(signingEnabled ? signRemapJar : remapJar)
+-	onlyIf {
+-		ENV.GITHUB_TOKEN
+-	}
+-
+-	doLast {
+-		def github = GitHub.connectUsingOAuth(ENV.GITHUB_TOKEN as String)
+-		def repository = github.getRepository(ENV.GITHUB_REPOSITORY)
+-
+-		def releaseBuilder = new GHReleaseBuilder(repository, version as String)
+-		releaseBuilder.name("[$project.minecraft_version] Fabric API $project.version")
+-		releaseBuilder.body(ENV.CHANGELOG ?: "No changelog provided")
+-		releaseBuilder.commitish(getBranch())
+-		releaseBuilder.prerelease(project.prerelease == "true")
+-
+-		def ghRelease = releaseBuilder.create()
+-		ghRelease.uploadAsset(signingEnabled ? signRemapJar.output.get().getAsFile() : remapJar.archiveFile.get().getAsFile(), "application/java-archive");
+-	}
+-}
+-
+-modrinth {
+-	projectId = "fabric-api"
+-	versionName = "[$project.minecraft_version] Fabric API $project.version"
+-	versionType = project.prerelease == "true" ? "beta" : "release"
+-	changelog = ENV.CHANGELOG ?: "No changelog provided"
+-
+-	uploadFile = signingEnabled ? signRemapJar.output : remapJar
+-}
+-
+-// A task to ensure that the version being released has not already been released.
+-tasks.register('checkVersion') {
+-	doFirst {
+-		def xml = new URL("https://maven.fabricmc.net/net/fabricmc/fabric-api/fabric-api/maven-metadata.xml").text
+-		def metadata = new XmlSlurper().parseText(xml)
+-		def versions = metadata.versioning.versions.version*.text();
+-		if (versions.contains(version)) {
+-			throw new RuntimeException("${version} has already been released!")
+-		}
+-	}
+-}
+-
+-github.mustRunAfter checkVersion
+-project.tasks.modrinth.mustRunAfter checkVersion
+-publish.mustRunAfter checkVersion
+-project.tasks.curseforge.mustRunAfter checkVersion
+diff --git a/deprecated/build.gradle b/deprecated/build.gradle
+deleted file mode 100644
+index dbe573d37dcc47daae4a6ead2db36ee7536f77e6..0000000000000000000000000000000000000000
+--- a/deprecated/build.gradle
++++ /dev/null
+@@ -1,35 +0,0 @@
+-/**
+- * This project generates a maven bill of materials (BOM) that includes the deprecated modules, alongside the main project.
+- */
+-version = rootProject.version
+-
+-publishing {
+-	publications {
+-		mavenJava(MavenPublication) {
+-			artifactId = 'fabric-api-deprecated'
+-
+-			pom.withXml {
+-				def depsNode = asNode().appendNode("dependencies")
+-				allprojects.each {
+-					if (it.name == "deprecated") return // Dont depend on yourself :)
+-
+-						// Depend on all of the deprecated projects
+-						if (!it.path.startsWith(":deprecated")) return
+-
+-						def depNode = depsNode.appendNode("dependency")
+-					depNode.appendNode("groupId", it.group)
+-					depNode.appendNode("artifactId", it.name)
+-					depNode.appendNode("version", it.version)
+-					depNode.appendNode("scope", "compile")
+-				}
+-
+-				// Depend on the main project.
+-				def depNode = depsNode.appendNode("dependency")
+-				depNode.appendNode("groupId", group)
+-				depNode.appendNode("artifactId", "fabric-api")
+-				depNode.appendNode("version", version)
+-				depNode.appendNode("scope", "compile")
+-			}
+-		}
+-	}
+-}
+diff --git a/deprecated/fabric-command-api-v1/build.gradle b/deprecated/fabric-command-api-v1/build.gradle
+deleted file mode 100644
+index 6afd12fe2cd723c27f93139e3d21150a69b7d3b9..0000000000000000000000000000000000000000
+--- a/deprecated/fabric-command-api-v1/build.gradle
++++ /dev/null
+@@ -1,7 +0,0 @@
+-archivesBaseName = "fabric-command-api-v1"
+-version = getSubprojectVersion(project)
+-
+-moduleDependencies(project, [
+-	'fabric-api-base',
+-	'fabric-command-api-v2'
+-])
+diff --git a/deprecated/fabric-commands-v0/build.gradle b/deprecated/fabric-commands-v0/build.gradle
+deleted file mode 100644
+index 1decd8dce413d289eceb3eaf41e314a0bf4c09e6..0000000000000000000000000000000000000000
+--- a/deprecated/fabric-commands-v0/build.gradle
++++ /dev/null
+@@ -1,12 +0,0 @@
+-archivesBaseName = "fabric-commands-v0"
+-version = getSubprojectVersion(project)
+-
+-moduleDependencies(project, [
+-	'fabric-api-base',
+-	'fabric-command-api-v2'
+-])
+-
+-loom {
+-	// workaround for lack of cross-project taw propagation in loom
+-	accessWidenerPath = file("fabric-commands-v0.accesswidener")
+-}
+diff --git a/deprecated/fabric-containers-v0/build.gradle b/deprecated/fabric-containers-v0/build.gradle
+deleted file mode 100644
+index 3a87ac952d65412e20750910959e306dcf69bf8a..0000000000000000000000000000000000000000
+--- a/deprecated/fabric-containers-v0/build.gradle
++++ /dev/null
+@@ -1,7 +0,0 @@
+-archivesBaseName = "fabric-containers-v0"
+-version = getSubprojectVersion(project)
+-
+-moduleDependencies(project, [
+-	'fabric-api-base',
+-	'fabric-networking-api-v1'
+-])
+diff --git a/deprecated/fabric-events-lifecycle-v0/build.gradle b/deprecated/fabric-events-lifecycle-v0/build.gradle
+deleted file mode 100644
+index 4bc6d891a7d503e6a686378405ed26d3818a2c44..0000000000000000000000000000000000000000
+--- a/deprecated/fabric-events-lifecycle-v0/build.gradle
++++ /dev/null
+@@ -1,8 +0,0 @@
+-archivesBaseName = "fabric-events-lifecycle-v0"
+-version = getSubprojectVersion(project)
+-
+-moduleDependencies(project, [
+-	'fabric-api-base',
+-	'fabric-item-api-v1',
+-	'fabric-lifecycle-events-v1'
+-])
+diff --git a/deprecated/fabric-keybindings-v0/build.gradle b/deprecated/fabric-keybindings-v0/build.gradle
+deleted file mode 100644
+index 50f676ea542c9429569aa1ac80d2a615d21c33f0..0000000000000000000000000000000000000000
+--- a/deprecated/fabric-keybindings-v0/build.gradle
++++ /dev/null
+@@ -1,6 +0,0 @@
+-archivesBaseName = "fabric-keybindings-v0"
+-version = getSubprojectVersion(project)
+-
+-moduleDependencies(project, [
+-	'fabric-key-binding-api-v1'
+-])
+diff --git a/deprecated/fabric-loot-tables-v1/build.gradle b/deprecated/fabric-loot-tables-v1/build.gradle
+deleted file mode 100644
+index ba46e8b42e614b59b15cade8651d917a1649823e..0000000000000000000000000000000000000000
+--- a/deprecated/fabric-loot-tables-v1/build.gradle
++++ /dev/null
+@@ -1,11 +0,0 @@
+-archivesBaseName = "fabric-loot-tables-v1"
+-version = getSubprojectVersion(project)
+-
+-moduleDependencies(project, [
+-	'fabric-api-base',
+-	'fabric-loot-api-v2'
+-])
+-
+-dependencies {
+-	testmodRuntimeOnly(project(path: ':fabric-resource-loader-v0', configuration: 'namedElements'))
+-}
+diff --git a/deprecated/fabric-networking-v0/build.gradle b/deprecated/fabric-networking-v0/build.gradle
+deleted file mode 100644
+index f4d366d9aa6f52a5f6e128846863048407af03be..0000000000000000000000000000000000000000
+--- a/deprecated/fabric-networking-v0/build.gradle
++++ /dev/null
+@@ -1,7 +0,0 @@
+-archivesBaseName = "fabric-networking-v0"
+-version = getSubprojectVersion(project)
+-
+-moduleDependencies(project, [
+-	'fabric-api-base',
+-	'fabric-networking-api-v1'
+-])
+diff --git a/deprecated/fabric-renderer-registries-v1/build.gradle b/deprecated/fabric-renderer-registries-v1/build.gradle
+deleted file mode 100644
+index 4e44b71157f56a1d62a4e5133c73d57739b3d1f8..0000000000000000000000000000000000000000
+--- a/deprecated/fabric-renderer-registries-v1/build.gradle
++++ /dev/null
+@@ -1,7 +0,0 @@
+-archivesBaseName = "fabric-renderer-registries-v1"
+-version = getSubprojectVersion(project)
+-
+-moduleDependencies(project, [
+-	'fabric-api-base',
+-	'fabric-rendering-v1'
+-])
+diff --git a/deprecated/fabric-rendering-v0/build.gradle b/deprecated/fabric-rendering-v0/build.gradle
+deleted file mode 100644
+index a709f8760eb26217205ec09ba072b4c33a0b0f00..0000000000000000000000000000000000000000
+--- a/deprecated/fabric-rendering-v0/build.gradle
++++ /dev/null
+@@ -1,7 +0,0 @@
+-archivesBaseName = "fabric-rendering-v0"
+-version = getSubprojectVersion(project)
+-
+-moduleDependencies(project, [
+-	'fabric-api-base',
+-	'fabric-rendering-v1'
+-])
+diff --git a/fabric-api-base/build.gradle b/fabric-api-base/build.gradle
+deleted file mode 100644
+index 182a62bb1623042543157416d5f64ff13c09864b..0000000000000000000000000000000000000000
+--- a/fabric-api-base/build.gradle
++++ /dev/null
+@@ -1,8 +0,0 @@
+-archivesBaseName = "fabric-api-base"
+-version = getSubprojectVersion(project)
+-
+-testDependencies(project, [
+-	':fabric-command-api-v2',
+-	':fabric-lifecycle-events-v1',
+-	':fabric-screen-api-v1'
+-])
+diff --git a/fabric-api-lookup-api-v1/build.gradle b/fabric-api-lookup-api-v1/build.gradle
+deleted file mode 100644
+index e842382f06f30d5b897035ed27eea985fb63b8ab..0000000000000000000000000000000000000000
+--- a/fabric-api-lookup-api-v1/build.gradle
++++ /dev/null
+@@ -1,12 +0,0 @@
+-archivesBaseName = "fabric-api-lookup-api-v1"
+-version = getSubprojectVersion(project)
+-
+-moduleDependencies(project, [
+-	'fabric-api-base',
+-	'fabric-lifecycle-events-v1'
+-])
+-
+-testDependencies(project, [
+-	':fabric-rendering-v1',
+-	':fabric-object-builder-api-v1'
+-])
+diff --git a/fabric-biome-api-v1/build.gradle b/fabric-biome-api-v1/build.gradle
+deleted file mode 100644
+index 5012031859439668a8a0f8ea701ffc61c0f9912f..0000000000000000000000000000000000000000
+--- a/fabric-biome-api-v1/build.gradle
++++ /dev/null
+@@ -1,43 +0,0 @@
+-archivesBaseName = "fabric-biome-api-v1"
+-version = getSubprojectVersion(project)
+-
+-loom {
+-	accessWidenerPath = file("src/main/resources/fabric-biome-api-v1.accesswidener")
+-}
+-
+-testDependencies(project, [
+-	':fabric-api-base',
+-	':fabric-resource-loader-v0',
+-	':fabric-registry-sync-v0',
+-	':fabric-data-generation-api-v1'
+-])
+-
+-sourceSets {
+-	testmod {
+-		resources {
+-			srcDirs += [
+-				'src/testmod/generated'
+-			]
+-		}
+-	}
+-}
+-
+-loom {
+-	runs {
+-		datagen {
+-			inherit testmodServer
+-			name "Data Generation"
+-			vmArg "-Dfabric-api.datagen"
+-			vmArg "-Dfabric-api.datagen.output-dir=${file("src/testmod/generated")}"
+-			vmArg "-Dfabric-api.datagen.strict-validation"
+-
+-			ideConfigGenerated = true
+-			runDir "build/datagen"
+-		}
+-	}
+-}
+-
+-// Ensure the worldgen JSONs are re-created to ensure the data-gen still works
+-test.dependsOn runDatagen
+-runTestmodClient.dependsOn runDatagen
+-generateResources.dependsOn runDatagen
+diff --git a/fabric-block-api-v1/build.gradle b/fabric-block-api-v1/build.gradle
+deleted file mode 100644
+index 0299872be2cc332787b7ddd996e2b4b182847f6a..0000000000000000000000000000000000000000
+--- a/fabric-block-api-v1/build.gradle
++++ /dev/null
+@@ -1,2 +0,0 @@
+-archivesBaseName = "fabric-block-api-v1"
+-version = getSubprojectVersion(project)
+diff --git a/fabric-blockrenderlayer-v1/build.gradle b/fabric-blockrenderlayer-v1/build.gradle
+deleted file mode 100644
+index 6abe270a2fd685ab65bb924ed33cc485325ed228..0000000000000000000000000000000000000000
+--- a/fabric-blockrenderlayer-v1/build.gradle
++++ /dev/null
+@@ -1,4 +0,0 @@
+-archivesBaseName = "fabric-blockrenderlayer-v1"
+-version = getSubprojectVersion(project)
+-
+-moduleDependencies(project, ['fabric-api-base'])
+diff --git a/fabric-client-tags-api-v1/build.gradle b/fabric-client-tags-api-v1/build.gradle
+deleted file mode 100644
+index 06eeeed397ea48539de728f1cbec710b62368aad..0000000000000000000000000000000000000000
+--- a/fabric-client-tags-api-v1/build.gradle
++++ /dev/null
+@@ -1,10 +0,0 @@
+-archivesBaseName = "fabric-client-tags-api-v1"
+-version = getSubprojectVersion(project)
+-
+-moduleDependencies(project, ['fabric-api-base'])
+-
+-testDependencies(project, [
+-	':fabric-convention-tags-v1',
+-	':fabric-lifecycle-events-v1',
+-	':fabric-resource-loader-v0',
+-])
+diff --git a/fabric-command-api-v2/build.gradle b/fabric-command-api-v2/build.gradle
+deleted file mode 100644
+index 8c17b0efe82d0f53ec50ee58a45262571ba89125..0000000000000000000000000000000000000000
+--- a/fabric-command-api-v2/build.gradle
++++ /dev/null
+@@ -1,12 +0,0 @@
+-archivesBaseName = "fabric-command-api-v2"
+-version = getSubprojectVersion(project)
+-
+-moduleDependencies(project, ['fabric-api-base'])
+-
+-testDependencies(project, [
+-	':fabric-lifecycle-events-v1',
+-])
+-
+-loom {
+-	accessWidenerPath = file('src/main/resources/fabric-command-api-v2.accesswidener')
+-}
+diff --git a/fabric-content-registries-v0/build.gradle b/fabric-content-registries-v0/build.gradle
+deleted file mode 100644
+index a86225b9b939edfdb6b70de3c22dc22fd716f1f2..0000000000000000000000000000000000000000
+--- a/fabric-content-registries-v0/build.gradle
++++ /dev/null
+@@ -1,12 +0,0 @@
+-archivesBaseName = "fabric-content-registries-v0"
+-version = getSubprojectVersion(project)
+-
+-loom {
+-	accessWidenerPath = file("src/main/resources/fabric-content-registries-v0.accesswidener")
+-}
+-
+-moduleDependencies(project, [
+-	'fabric-api-base',
+-	'fabric-lifecycle-events-v1',
+-	'fabric-resource-loader-v0'
+-])
+diff --git a/fabric-convention-tags-v1/build.gradle b/fabric-convention-tags-v1/build.gradle
+deleted file mode 100644
+index 9c30736c4d99bac42cfba2b601609997d7f80202..0000000000000000000000000000000000000000
+--- a/fabric-convention-tags-v1/build.gradle
++++ /dev/null
+@@ -1,46 +0,0 @@
+-archivesBaseName = "fabric-convention-tags-v1"
+-version = getSubprojectVersion(project)
+-
+-moduleDependencies(project, ['fabric-api-base'])
+-
+-testDependencies(project, [
+-	':fabric-lifecycle-events-v1',
+-])
+-
+-sourceSets {
+-	main {
+-		resources {
+-			srcDirs += [
+-				'src/generated/resources'
+-			]
+-		}
+-	}
+-	datagen {
+-		compileClasspath += main.compileClasspath
+-		runtimeClasspath += main.runtimeClasspath
+-		compileClasspath += main.output
+-		runtimeClasspath += main.output
+-	}
+-}
+-
+-dependencies {
+-	datagenImplementation project(path: ":fabric-data-generation-api-v1", configuration: 'namedElements')
+-}
+-
+-loom {
+-	runs {
+-		datagen {
+-			inherit server
+-			name "Data Generation"
+-			vmArg "-Dfabric-api.datagen"
+-			vmArg "-Dfabric-api.datagen.output-dir=${file("src/generated/resources")}"
+-			vmArg "-Dfabric-api.datagen.strict-validation"
+-
+-			ideConfigGenerated = true
+-			runDir "build/datagen"
+-			source sourceSets.datagen
+-		}
+-	}
+-}
+-
+-generateResources.dependsOn runDatagen
+diff --git a/fabric-crash-report-info-v1/build.gradle b/fabric-crash-report-info-v1/build.gradle
+deleted file mode 100644
+index 1909659a61733081e4fa050a16a9aece15e4dcdc..0000000000000000000000000000000000000000
+--- a/fabric-crash-report-info-v1/build.gradle
++++ /dev/null
+@@ -1,2 +0,0 @@
+-archivesBaseName = "fabric-crash-report-info-v1"
+-version = getSubprojectVersion(project)
+diff --git a/fabric-data-generation-api-v1/build.gradle b/fabric-data-generation-api-v1/build.gradle
+deleted file mode 100644
+index 9333f27e5388f74ef903b31c1e9fa4502e7714d7..0000000000000000000000000000000000000000
+--- a/fabric-data-generation-api-v1/build.gradle
++++ /dev/null
+@@ -1,199 +0,0 @@
+-archivesBaseName = "fabric-data-generation-api-v1"
+-version = getSubprojectVersion(project)
+-
+-moduleDependencies(project, [
+-	'fabric-api-base',
+-	'fabric-registry-sync-v0',
+-	'fabric-networking-api-v1',
+-	'fabric-resource-conditions-api-v1',
+-	'fabric-item-group-api-v1',
+-	'fabric-recipe-api-v1',
+-])
+-
+-dependencies {
+-}
+-
+-sourceSets {
+-	testmod {
+-		resources {
+-			srcDirs += [
+-				'src/testmod/generated'
+-			]
+-		}
+-	}
+-}
+-
+-loom {
+-	accessWidenerPath = file("src/main/resources/fabric-data-generation-api-v1.accesswidener")
+-
+-	runs {
+-		datagen {
+-			inherit testmodServer
+-			name "Data Generation"
+-			vmArg "-Dfabric-api.datagen"
+-			vmArg "-Dfabric-api.datagen.output-dir=${file("src/testmod/generated")}"
+-			vmArg "-Dfabric-api.datagen.strict-validation"
+-
+-			ideConfigGenerated = true
+-			runDir "build/datagen"
+-		}
+-		datagenClient {
+-			client()
+-			name "Data Generation Client"
+-			vmArg "-Dfabric-api.datagen"
+-			vmArg "-Dfabric-api.datagen.output-dir=${file("src/testmod/generated")}"
+-			vmArg "-Dfabric-api.datagen.strict-validation"
+-
+-			ideConfigGenerated = true
+-			runDir "build/datagen"
+-			source sourceSets.testmodClient
+-		}
+-	}
+-}
+-
+-test.dependsOn runDatagen
+-
+-task datapackZip(type: Zip, dependsOn: runDatagen) {
+-	archiveFileName = "${archivesBaseName}-${project.version}-test-datapack.zip"
+-	destinationDirectory = layout.buildDirectory.dir('libs')
+-
+-	from file("src/testmod/generated")
+-	from file("pack.mcmeta")
+-}
+-
+-build.dependsOn datapackZip
+-
+-import org.objectweb.asm.ClassReader
+-import org.objectweb.asm.Opcodes
+-import org.objectweb.asm.tree.ClassNode
+-
+-import java.lang.reflect.Modifier
+-import java.util.zip.ZipEntry
+-import java.util.zip.ZipFile
+-
+-task generateAccessWidener() {
+-	doLast {
+-		File inputJar = loom.namedMinecraftProvider.parentMinecraftProvider.commonJar.path.toFile()
+-		String accessWidener = "accessWidener\tv2\tnamed\n"
+-		accessWidener += "\n"
+-		accessWidener += "# DO NOT EDIT BY HAND! This file is generated automatically.\n"
+-		accessWidener += "# Edit \"template.accesswidener\" instead then run \"gradlew generateAccessWidener\".\n"
+-		accessWidener += "\n"
+-		accessWidener += file("template.accesswidener").text + "\n"
+-
+-		def classes = getClasses(inputJar)
+-
+-		visitMethods(classes["net/minecraft/data/server/recipe/RecipeProvider"]) { name, desc, owner ->
+-			if (it.name == "generate")
+-				return
+-
+-			accessWidener += "transitive-accessible\tmethod\t${owner}\t${name}\t${desc}\n"
+-		}
+-
+-		visitMethods(classes["net/minecraft/data/client/BlockStateModelGenerator"]) { name, desc, owner ->
+-			if (desc == "()V")
+-				// Skip over methods that dont take any arguments, as they are specific to minecraft.
+-				return
+-
+-			accessWidener += "transitive-accessible\tmethod\t${owner}\t${name}\t${desc}\n"
+-		}
+-
+-		visitMethods(classes["net/minecraft/data/server/loottable/BlockLootTableGenerator"]) { name, desc, owner ->
+-			accessWidener += "transitive-accessible\tmethod\t${owner}\t${name}\t${desc}\n"
+-		}
+-
+-		visitMethods(classes["net/minecraft/data/client/ItemModelGenerator"]) { name, desc, owner ->
+-			accessWidener += "transitive-accessible\tmethod\t${owner}\t${name}\t${desc}\n"
+-		}
+-
+-		classes.values().forEach { classNode ->
+-			visitFinalMethods(classNode) { name, desc, owner ->
+-				if (name != "getName" || desc != "()Ljava/lang/String;") {
+-					// Not the method we are after
+-					return
+-				}
+-
+-				if (!hasAncestor(classNode, classes, "net/minecraft/data/DataProvider")) {
+-					// Not a descendant of DataProvider
+-					return
+-				}
+-
+-				accessWidener += "transitive-extendable\tmethod\t${owner}\t${name}\t${desc}\n"
+-			}
+-		}
+-
+-		file("src/main/resources/fabric-data-generation-api-v1.accesswidener").text = accessWidener
+-	}
+-}
+-
+-def visitMethods(ClassNode classNode, closure) {
+-	classNode.methods.forEach {
+-		if ((it.access & Opcodes.ACC_SYNTHETIC) != 0 || (it.access & Opcodes.ACC_PUBLIC) != 0)
+-			return
+-
+-		if (it.name.startsWith("<"))
+-			return
+-
+-		closure(it.name, it.desc, classNode.name)
+-	}
+-}
+-
+-def visitFinalMethods(ClassNode classNode, closure) {
+-	classNode.methods.forEach {
+-		if (!Modifier.isFinal(it.access))
+-			return
+-
+-		if (it.name.startsWith("<"))
+-			return
+-
+-		closure(it.name, it.desc, classNode.name)
+-	}
+-}
+-
+-// Return a map of all class names to classNodes
+-def getClasses(File input) {
+-	Map<String, ClassNode> classes = new TreeMap<>()
+-
+-	new ZipFile(input).withCloseable { ZipFile zip  ->
+-		zip.entries().toList().forEach { ZipEntry entry ->
+-			if (!entry.name.endsWith(".class")) {
+-				return
+-			}
+-
+-			zip.getInputStream(entry).withCloseable { is ->
+-				ClassReader reader = new ClassReader(is)
+-				ClassNode classNode = new ClassNode()
+-				reader.accept(classNode, ClassReader.SKIP_CODE)
+-
+-				classes.put(classNode.name, classNode)
+-			}
+-		}
+-	}
+-
+-	return classes
+-}
+-
+-def hasAncestor(ClassNode classNode, Map<String, ClassNode> classes, String ancestorName) {
+-	if (classNode.superName == ancestorName) {
+-		return true
+-	}
+-
+-	// Recuse through the super classes
+-	def superClass = classes.get(classNode.superName)
+-	if (superClass != null && hasAncestor(superClass, classes, ancestorName)) {
+-		return true
+-	}
+-
+-	for (def interfaceName : classNode.interfaces) {
+-		if (interfaceName == ancestorName) {
+-			return true
+-		}
+-
+-		def ifaceClass = classes.get(interfaceName)
+-		if (ifaceClass != null && hasAncestor(ifaceClass, classes, ancestorName)) {
+-			return true
+-		}
+-	}
+-}
+-
+-generateResources.dependsOn generateAccessWidener
+diff --git a/fabric-dimensions-v1/build.gradle b/fabric-dimensions-v1/build.gradle
+deleted file mode 100644
+index 1b0b8fab7883a5a63bcda8a27b23c88ef6e3df5a..0000000000000000000000000000000000000000
+--- a/fabric-dimensions-v1/build.gradle
++++ /dev/null
+@@ -1,10 +0,0 @@
+-archivesBaseName = "fabric-dimensions-v1"
+-version = getSubprojectVersion(project)
+-
+-moduleDependencies(project, ['fabric-api-base'])
+-
+-testDependencies(project, [
+-	':fabric-command-api-v2',
+-	':fabric-resource-loader-v0',
+-	':fabric-lifecycle-events-v1'
+-])
+diff --git a/fabric-entity-events-v1/build.gradle b/fabric-entity-events-v1/build.gradle
+deleted file mode 100644
+index 7dd922250f032bbeccf585efd2f6c8e64fac6f6a..0000000000000000000000000000000000000000
+--- a/fabric-entity-events-v1/build.gradle
++++ /dev/null
+@@ -1,11 +0,0 @@
+-archivesBaseName = "fabric-entity-events-v1"
+-version = getSubprojectVersion(project)
+-
+-moduleDependencies(project, ['fabric-api-base'])
+-
+-testDependencies(project, [
+-	':fabric-command-api-v2',
+-	':fabric-networking-api-v1',
+-	':fabric-registry-sync-v0',
+-	':fabric-rendering-v1'
+-])
+diff --git a/fabric-events-interaction-v0/build.gradle b/fabric-events-interaction-v0/build.gradle
+deleted file mode 100644
+index a2e684128dd70902e778a912a9c06464848964bf..0000000000000000000000000000000000000000
+--- a/fabric-events-interaction-v0/build.gradle
++++ /dev/null
+@@ -1,4 +0,0 @@
+-archivesBaseName = "fabric-events-interaction-v0"
+-version = getSubprojectVersion(project)
+-
+-moduleDependencies(project, ['fabric-api-base'])
+diff --git a/fabric-game-rule-api-v1/build.gradle b/fabric-game-rule-api-v1/build.gradle
+deleted file mode 100644
+index 506856782cfc5fa9dbed06a2a9a709c2ab20569f..0000000000000000000000000000000000000000
+--- a/fabric-game-rule-api-v1/build.gradle
++++ /dev/null
+@@ -1,12 +0,0 @@
+-archivesBaseName = "fabric-game-rule-api-v1"
+-version = getSubprojectVersion(project)
+-
+-loom {
+-	accessWidenerPath = file("src/main/resources/fabric-game-rule-api-v1.accesswidener")
+-}
+-
+-testDependencies(project, [
+-	':fabric-api-base',
+-	':fabric-lifecycle-events-v1',
+-	':fabric-resource-loader-v0'
+-])
+diff --git a/fabric-gametest-api-v1/build.gradle b/fabric-gametest-api-v1/build.gradle
+deleted file mode 100644
+index 851ec7da8fc4bc63657ec081e111f1410aaf8757..0000000000000000000000000000000000000000
+--- a/fabric-gametest-api-v1/build.gradle
++++ /dev/null
+@@ -1,11 +0,0 @@
+-archivesBaseName = "fabric-gametest-api-v1"
+-version = getSubprojectVersion(project)
+-
+-loom {
+-	accessWidenerPath = file("src/main/resources/fabric-gametest-api-v1.accesswidener")
+-}
+-
+-moduleDependencies(project, [
+-	'fabric-api-base',
+-	'fabric-resource-loader-v0'
+-])
+diff --git a/fabric-item-api-v1/build.gradle b/fabric-item-api-v1/build.gradle
+deleted file mode 100644
+index ae9e5b889f6152972ca6d86cb66b54f3d17f161d..0000000000000000000000000000000000000000
+--- a/fabric-item-api-v1/build.gradle
++++ /dev/null
+@@ -1,8 +0,0 @@
+-archivesBaseName = "fabric-item-api-v1"
+-version = getSubprojectVersion(project)
+-
+-moduleDependencies(project, ['fabric-api-base'])
+-
+-testDependencies(project, [
+-	':fabric-content-registries-v0',
+-])
+diff --git a/fabric-item-group-api-v1/build.gradle b/fabric-item-group-api-v1/build.gradle
+deleted file mode 100644
+index 7a8a9237a6c7b086e89e4c48e086a347bd6e67b9..0000000000000000000000000000000000000000
+--- a/fabric-item-group-api-v1/build.gradle
++++ /dev/null
+@@ -1,11 +0,0 @@
+-archivesBaseName = "fabric-item-group-api-v1"
+-version = getSubprojectVersion(project)
+-
+-moduleDependencies(project, [
+-	'fabric-api-base',
+-	'fabric-resource-loader-v0'
+-])
+-
+-loom {
+-	accessWidenerPath = file('src/main/resources/fabric-item-group-api-v1.accesswidener')
+-}
+diff --git a/fabric-key-binding-api-v1/build.gradle b/fabric-key-binding-api-v1/build.gradle
+deleted file mode 100644
+index 64dcf3c11f2d5d09d670b170d529ba6664f51c0a..0000000000000000000000000000000000000000
+--- a/fabric-key-binding-api-v1/build.gradle
++++ /dev/null
+@@ -1,8 +0,0 @@
+-archivesBaseName = "fabric-key-binding-api-v1"
+-version = getSubprojectVersion(project)
+-
+-testDependencies(project, [
+-	':fabric-api-base',
+-	':fabric-lifecycle-events-v1',
+-	':fabric-resource-loader-v0'
+-])
+diff --git a/fabric-lifecycle-events-v1/build.gradle b/fabric-lifecycle-events-v1/build.gradle
+deleted file mode 100644
+index 0dd2bac50fc9aa6e586109c3890531a421410c90..0000000000000000000000000000000000000000
+--- a/fabric-lifecycle-events-v1/build.gradle
++++ /dev/null
+@@ -1,8 +0,0 @@
+-archivesBaseName = "fabric-lifecycle-events-v1"
+-version = getSubprojectVersion(project)
+-
+-loom {
+-	accessWidenerPath = file("src/main/resources/fabric-lifecycle-events-v1.accesswidener")
+-}
+-
+-moduleDependencies(project, ['fabric-api-base'])
+diff --git a/fabric-loot-api-v2/build.gradle b/fabric-loot-api-v2/build.gradle
+deleted file mode 100644
+index 557749a7ca159f60b48a17d68f00407f819dbfc3..0000000000000000000000000000000000000000
+--- a/fabric-loot-api-v2/build.gradle
++++ /dev/null
+@@ -1,7 +0,0 @@
+-archivesBaseName = "fabric-loot-api-v2"
+-version = getSubprojectVersion(project)
+-
+-moduleDependencies(project, [
+-	'fabric-api-base',
+-	'fabric-resource-loader-v0'
+-])
+diff --git a/fabric-message-api-v1/build.gradle b/fabric-message-api-v1/build.gradle
+deleted file mode 100644
+index 79491115f91b9591d7d8fb53dd76abce22e5f1a0..0000000000000000000000000000000000000000
+--- a/fabric-message-api-v1/build.gradle
++++ /dev/null
+@@ -1,6 +0,0 @@
+-archivesBaseName = "fabric-message-api-v1"
+-version = getSubprojectVersion(project)
+-
+-moduleDependencies(project, ['fabric-api-base'])
+-
+-testDependencies(project, ['fabric-command-api-v2'])
+diff --git a/fabric-mining-level-api-v1/build.gradle b/fabric-mining-level-api-v1/build.gradle
+deleted file mode 100644
+index 750e26698a87a6e8a52ae485a16416ef1736cccf..0000000000000000000000000000000000000000
+--- a/fabric-mining-level-api-v1/build.gradle
++++ /dev/null
+@@ -1,12 +0,0 @@
+-archivesBaseName = "fabric-mining-level-api-v1"
+-version = getSubprojectVersion(project)
+-
+-moduleDependencies(project, [
+-	'fabric-api-base',
+-	'fabric-lifecycle-events-v1',
+-	'fabric-resource-loader-v0'
+-])
+-
+-testDependencies(project, [
+-	':fabric-lifecycle-events-v1'
+-])
+diff --git a/fabric-models-v0/build.gradle b/fabric-models-v0/build.gradle
+deleted file mode 100644
+index 58fefe77b6f31b68f47617070d95cec19d54f505..0000000000000000000000000000000000000000
+--- a/fabric-models-v0/build.gradle
++++ /dev/null
+@@ -1,9 +0,0 @@
+-archivesBaseName = "fabric-models-v0"
+-version = getSubprojectVersion(project)
+-
+-moduleDependencies(project, ['fabric-api-base'])
+-
+-testDependencies(project, [
+-	':fabric-rendering-v1',
+-	':fabric-resource-loader-v0'
+-])
+diff --git a/fabric-networking-api-v1/build.gradle b/fabric-networking-api-v1/build.gradle
+deleted file mode 100644
+index d622d32e46e29e5e81cd2c07c985c00110402da3..0000000000000000000000000000000000000000
+--- a/fabric-networking-api-v1/build.gradle
++++ /dev/null
+@@ -1,10 +0,0 @@
+-archivesBaseName = "fabric-networking-api-v1"
+-version = getSubprojectVersion(project)
+-
+-moduleDependencies(project, ['fabric-api-base'])
+-
+-testDependencies(project, [
+-	':fabric-command-api-v2',
+-	':fabric-lifecycle-events-v1',
+-	':fabric-key-binding-api-v1'
+-])
+diff --git a/fabric-object-builder-api-v1/build.gradle b/fabric-object-builder-api-v1/build.gradle
+deleted file mode 100644
+index 9d9976e47245a1b969de691c7b84b10bebb0c4a1..0000000000000000000000000000000000000000
+--- a/fabric-object-builder-api-v1/build.gradle
++++ /dev/null
+@@ -1,17 +0,0 @@
+-archivesBaseName = "fabric-object-builder-api-v1"
+-version = getSubprojectVersion(project)
+-
+-moduleDependencies(project, [
+-	'fabric-api-base',
+-	'fabric-resource-loader-v0'
+-])
+-
+-testDependencies(project, [':fabric-command-api-v2'])
+-
+-loom {
+-	accessWidenerPath = file("src/main/resources/fabric-object-builder-api-v1.accesswidener")
+-}
+-
+-validateMixinNames {
+-	exclude "**/ModelPredicateProviderRegistrySpecificAccessor.class"
+-}
+diff --git a/fabric-particles-v1/build.gradle b/fabric-particles-v1/build.gradle
+deleted file mode 100644
+index e08296ddf60da15a333d626df4ff825cc32d8407..0000000000000000000000000000000000000000
+--- a/fabric-particles-v1/build.gradle
++++ /dev/null
+@@ -1,19 +0,0 @@
+-archivesBaseName = "fabric-particles-v1"
+-version = getSubprojectVersion(project)
+-
+-loom {
+-	accessWidenerPath = file("src/main/resources/fabric-particles-v1.accesswidener")
+-}
+-
+-moduleDependencies(project, ['fabric-api-base'])
+-
+-testDependencies(project, [
+-		':fabric-command-api-v2',
+-		':fabric-rendering-v1',
+-		':fabric-resource-loader-v0'
+-])
+-
+-validateMixinNames {
+-	// Loom needs to handle inner mixins better
+-	exclude "**/ParticleManagerAccessor\$SimpleSpriteProviderAccessor.class"
+-}
+diff --git a/fabric-recipe-api-v1/build.gradle b/fabric-recipe-api-v1/build.gradle
+deleted file mode 100644
+index 2d85d16a43a9c1a20654664a946bfc80f1aea758..0000000000000000000000000000000000000000
+--- a/fabric-recipe-api-v1/build.gradle
++++ /dev/null
+@@ -1,10 +0,0 @@
+-archivesBaseName = "fabric-recipe-api-v1"
+-version = getSubprojectVersion(project)
+-
+-loom {
+-	accessWidenerPath = file('src/main/resources/fabric-recipe-api-v1.accesswidener')
+-}
+-
+-moduleDependencies(project, [
+-	"fabric-networking-api-v1",
+-])
+diff --git a/fabric-registry-sync-v0/build.gradle b/fabric-registry-sync-v0/build.gradle
+deleted file mode 100644
+index e161b139c224a575a0497cf1b6f9a16ebc754a3d..0000000000000000000000000000000000000000
+--- a/fabric-registry-sync-v0/build.gradle
++++ /dev/null
+@@ -1,16 +0,0 @@
+-archivesBaseName = "fabric-registry-sync-v0"
+-version = getSubprojectVersion(project)
+-
+-loom {
+-	accessWidenerPath = file("src/main/resources/fabric-registry-sync-v0.accesswidener")
+-}
+-
+-moduleDependencies(project, [
+-	'fabric-api-base',
+-	'fabric-networking-api-v1'
+-])
+-
+-testDependencies(project, [
+-	':fabric-lifecycle-events-v1',
+-	':fabric-command-api-v2',
+-])
+diff --git a/fabric-renderer-api-v1/build.gradle b/fabric-renderer-api-v1/build.gradle
+deleted file mode 100644
+index f8b1366eb89098dc27f5ac618d373cc458c6709c..0000000000000000000000000000000000000000
+--- a/fabric-renderer-api-v1/build.gradle
++++ /dev/null
+@@ -1,14 +0,0 @@
+-archivesBaseName = "fabric-renderer-api-v1"
+-version = getSubprojectVersion(project)
+-
+-moduleDependencies(project, ['fabric-api-base'])
+-
+-testDependencies(project, [
+-	':fabric-block-api-v1',
+-	':fabric-blockrenderlayer-v1',
+-	':fabric-models-v0',
+-	':fabric-object-builder-api-v1',
+-	':fabric-renderer-indigo',
+-	':fabric-rendering-data-attachment-v1',
+-	':fabric-resource-loader-v0'
+-])
+diff --git a/fabric-renderer-indigo/build.gradle b/fabric-renderer-indigo/build.gradle
+deleted file mode 100644
+index 70bf920fbfaec903b2c189f96e39bc3d93b6ede9..0000000000000000000000000000000000000000
+--- a/fabric-renderer-indigo/build.gradle
++++ /dev/null
+@@ -1,11 +0,0 @@
+-archivesBaseName = "fabric-renderer-indigo"
+-version = getSubprojectVersion(project)
+-
+-loom {
+-	accessWidenerPath = file("src/client/resources/fabric-renderer-indigo.accesswidener")
+-}
+-
+-moduleDependencies(project, [
+-	'fabric-api-base',
+-	'fabric-renderer-api-v1'
+-])
+diff --git a/fabric-rendering-data-attachment-v1/build.gradle b/fabric-rendering-data-attachment-v1/build.gradle
+deleted file mode 100644
+index 329d2499e7163d6371e1a905ba425abcd92cdae7..0000000000000000000000000000000000000000
+--- a/fabric-rendering-data-attachment-v1/build.gradle
++++ /dev/null
+@@ -1,8 +0,0 @@
+-archivesBaseName = "fabric-rendering-data-attachment-v1"
+-version = getSubprojectVersion(project)
+-
+-moduleDependencies(project, ['fabric-api-base'])
+-
+-loom {
+-	accessWidenerPath = file("src/main/resources/fabric-rendering-data-attachment-v1.accesswidener")
+-}
+diff --git a/fabric-rendering-fluids-v1/build.gradle b/fabric-rendering-fluids-v1/build.gradle
+deleted file mode 100644
+index 7cea017230feb05a088a34aa2d43fbcfcb28cd1d..0000000000000000000000000000000000000000
+--- a/fabric-rendering-fluids-v1/build.gradle
++++ /dev/null
+@@ -1,4 +0,0 @@
+-archivesBaseName = "fabric-rendering-fluids-v1"
+-version = getSubprojectVersion(project)
+-
+-moduleDependencies(project, ['fabric-api-base'])
+diff --git a/fabric-rendering-v1/build.gradle b/fabric-rendering-v1/build.gradle
+deleted file mode 100644
+index 3bc0f4aea4d1248a305d3bc2808ce9367434811b..0000000000000000000000000000000000000000
+--- a/fabric-rendering-v1/build.gradle
++++ /dev/null
+@@ -1,8 +0,0 @@
+-archivesBaseName = "fabric-rendering-v1"
+-version = getSubprojectVersion(project)
+-
+-moduleDependencies(project, ['fabric-api-base'])
+-
+-testDependencies(project, [
+-	':fabric-object-builder-api-v1'
+-])
+diff --git a/fabric-resource-conditions-api-v1/build.gradle b/fabric-resource-conditions-api-v1/build.gradle
+deleted file mode 100644
+index 9975db89a1c3e3912384916b0eac837818ca1499..0000000000000000000000000000000000000000
+--- a/fabric-resource-conditions-api-v1/build.gradle
++++ /dev/null
+@@ -1,4 +0,0 @@
+-archivesBaseName = "fabric-resource-conditions-api-v1"
+-version = getSubprojectVersion(project)
+-
+-testDependencies(project, [':fabric-gametest-api-v1'])
+diff --git a/fabric-resource-loader-v0/build.gradle b/fabric-resource-loader-v0/build.gradle
+deleted file mode 100644
+index e6c827bfaf3f2b6c2d4825f9820d1212833950b3..0000000000000000000000000000000000000000
+--- a/fabric-resource-loader-v0/build.gradle
++++ /dev/null
+@@ -1,12 +0,0 @@
+-archivesBaseName = "fabric-resource-loader-v0"
+-version = getSubprojectVersion(project)
+-
+-loom {
+-	accessWidenerPath = file("src/main/resources/fabric-resource-loader-v0.accesswidener")
+-}
+-
+-testDependencies(project, [
+-	':fabric-lifecycle-events-v1',
+-	':fabric-api-base',
+-	':fabric-resource-loader-v0'
+-])
+diff --git a/fabric-screen-api-v1/build.gradle b/fabric-screen-api-v1/build.gradle
+deleted file mode 100644
+index b1e70a3f58b5442320162295d09daa48c0e04a91..0000000000000000000000000000000000000000
+--- a/fabric-screen-api-v1/build.gradle
++++ /dev/null
+@@ -1,4 +0,0 @@
+-archivesBaseName = "fabric-screen-api-v1"
+-version = getSubprojectVersion(project)
+-
+-moduleDependencies(project, ['fabric-api-base'])
+diff --git a/fabric-screen-handler-api-v1/build.gradle b/fabric-screen-handler-api-v1/build.gradle
+deleted file mode 100644
+index 089aa943d5d717e0a9db92759a8897affb61c62b..0000000000000000000000000000000000000000
+--- a/fabric-screen-handler-api-v1/build.gradle
++++ /dev/null
+@@ -1,16 +0,0 @@
+-archivesBaseName = "fabric-screen-handler-api-v1"
+-version = getSubprojectVersion(project)
+-
+-loom {
+-	accessWidenerPath = file('src/main/resources/fabric-screen-handler-api-v1.accesswidener')
+-}
+-
+-moduleDependencies(project, [
+-	'fabric-api-base',
+-	'fabric-networking-api-v1'
+-])
+-
+-testDependencies(project, [
+-	':fabric-object-builder-api-v1',
+-	':fabric-resource-loader-v0'
+-])
+diff --git a/fabric-sound-api-v1/build.gradle b/fabric-sound-api-v1/build.gradle
+deleted file mode 100644
+index 2a9df474d7d240ffa42537a9f3c3c66487ada9ab..0000000000000000000000000000000000000000
+--- a/fabric-sound-api-v1/build.gradle
++++ /dev/null
+@@ -1,8 +0,0 @@
+-archivesBaseName = "fabric-sound-api-v1"
+-version = getSubprojectVersion(project)
+-
+-testDependencies(project, [
+-	':fabric-api-base',
+-	':fabric-resource-loader-v0',
+-	':fabric-command-api-v2'
+-])
+diff --git a/fabric-transfer-api-v1/build.gradle b/fabric-transfer-api-v1/build.gradle
+deleted file mode 100644
+index e63162015a180b6501e57d8514499b3bd587a491..0000000000000000000000000000000000000000
+--- a/fabric-transfer-api-v1/build.gradle
++++ /dev/null
+@@ -1,16 +0,0 @@
+-archivesBaseName = "fabric-transfer-api-v1"
+-version = getSubprojectVersion(project)
+-
+-moduleDependencies(project, [
+-	'fabric-api-base',
+-	'fabric-api-lookup-api-v1',
+-	'fabric-lifecycle-events-v1',
+-	// transitive dependency of API Lookup
+-	'fabric-rendering-fluids-v1',
+-])
+-
+-testDependencies(project, [
+-	':fabric-object-builder-api-v1',
+-	':fabric-rendering-v1',
+-	':fabric-resource-loader-v0'
+-])
+diff --git a/fabric-transitive-access-wideners-v1/build.gradle b/fabric-transitive-access-wideners-v1/build.gradle
+deleted file mode 100644
+index 615421871234f4df1a45e950678d7d5e2e027271..0000000000000000000000000000000000000000
+--- a/fabric-transitive-access-wideners-v1/build.gradle
++++ /dev/null
+@@ -1,143 +0,0 @@
+-archivesBaseName = "fabric-transitive-access-wideners-v1"
+-version = getSubprojectVersion(project)
+-
+-loom {
+-	accessWidenerPath = file('src/main/resources/fabric-transitive-access-wideners-v1.accesswidener')
+-}
+-
+-testDependencies(project, [
+-	':fabric-rendering-v1',
+-	':fabric-object-builder-api-v1'
+-])
+-
+-
+-import org.objectweb.asm.ClassReader
+-import org.objectweb.asm.Opcodes
+-import org.objectweb.asm.Type
+-import org.objectweb.asm.tree.ClassNode
+-
+-import java.nio.file.FileSystem
+-import java.nio.file.FileSystems
+-import java.nio.file.Files
+-import java.nio.file.Path
+-import java.util.stream.Collectors
+-
+-task generateAccessWidener {
+-	doLast {
+-		List<String> lines = new ArrayList<>();
+-		lines.add("accessWidener v2 named")
+-		lines.add("")
+-		lines.add("# DO NOT EDIT BY HAND! This file is generated automatically.")
+-		lines.add("# Edit \"template.accesswidener\" instead then run \"gradlew generateAccessWidener\".")
+-		lines.add("")
+-		lines.addAll(file("template.accesswidener").text.lines().toList())
+-
+-		Path commonJar = loom.namedMinecraftProvider.parentMinecraftProvider.commonJar.path
+-
+-		FileSystems.newFileSystem(URI.create("jar:${commonJar.toUri()}"), [create: false]).withCloseable { fs ->
+-			generateBlockConstructors(lines, fs)
+-			lines.add("")
+-			generateItemConstructors(lines, fs)
+-			lines.add("")
+-		}
+-
+-		Path clientJar = loom.namedMinecraftProvider.parentMinecraftProvider.clientOnlyJar.path
+-
+-		FileSystems.newFileSystem(URI.create("jar:${clientJar.toUri()}"), [create: false]).withCloseable { fs ->
+-			generateRenderPhaseFields(lines, fs)
+-		}
+-
+-		file('src/main/resources/fabric-transitive-access-wideners-v1.accesswidener').text = String.join('\n', lines) + '\n'
+-
+-		validateAccessWidener(lines)
+-	}
+-}
+-
+-def generateBlockConstructors(List<String> lines, FileSystem fs) {
+-	lines.add("# Constructors of non-abstract block classes")
+-	Files.list(fs.getPath("net/minecraft/block"))
+-			.filter { Files.isRegularFile(it) && it.toString().endsWith(".class") }
+-			.map { loadClass(it) }
+-			.sorted(Comparator.comparing { it.name })
+-			.filter { (it.access & Opcodes.ACC_ABSTRACT) == 0 }
+-			.forEach { node ->
+-				for (def method : node.methods) {
+-					// Checklist for finding block constructors as of 1.19.3:
+-					//  - class directly in net.minecraft.block (excluding subpackages)
+-					//  - method name == <init> (by definition)
+-					//  - contains an AbstractBlock$Settings parameter
+-					//  - only taking into account non-abstract classes and non-public constructors
+-
+-					// Block constructor...
+-					if (method.name == "<init>" && Type.getArgumentTypes(method.desc).any { it.internalName == 'net/minecraft/block/AbstractBlock$Settings' }) {
+-						// ...and non-public
+-						if ((method.access & Opcodes.ACC_PUBLIC) == 0) {
+-							lines.add("transitive-accessible method $node.name <init> $method.desc")
+-						}
+-					}
+-				}
+-			}
+-}
+-
+-def generateItemConstructors(List<String> lines, FileSystem fs) {
+-	lines.add("# Constructors of non-abstract item classes")
+-	Files.list(fs.getPath("net/minecraft/item"))
+-			.filter { Files.isRegularFile(it) && it.toString().endsWith(".class") }
+-			.map { loadClass(it) }
+-			.sorted(Comparator.comparing { it.name })
+-			.filter { (it.access & Opcodes.ACC_ABSTRACT) == 0 }
+-			.forEach { node ->
+-				for (def method : node.methods) {
+-					// Checklist for finding item constructors as of 1.19.3:
+-					//  - class directly in net.minecraft.item (excluding subpackages)
+-					//  - method name == <init> (by definition)
+-					//  - contains an Item$Settings parameter
+-					//  - only taking into account non-abstract classes and non-public constructors
+-
+-					// Item constructor...
+-					if (method.name == "<init>" && Type.getArgumentTypes(method.desc).any { it.internalName == 'net/minecraft/item/Item$Settings' }) {
+-						// ...and non-public
+-						if ((method.access & Opcodes.ACC_PUBLIC) == 0) {
+-							lines.add("transitive-accessible method $node.name <init> $method.desc")
+-						}
+-					}
+-				}
+-			}
+-}
+-
+-def generateRenderPhaseFields(List<String> lines, FileSystem fs) {
+-	lines.add("# Protected static fields of RenderPhase")
+-
+-	for (def field : loadClass(fs.getPath("net/minecraft/client/render/RenderPhase.class")).fields) {
+-		// All protected static fields of RenderPhase
+-		if ((field.access & Opcodes.ACC_PROTECTED) != 0 && (field.access & Opcodes.ACC_STATIC) != 0) {
+-			lines.add("transitive-accessible field net/minecraft/client/render/RenderPhase ${field.name} ${field.desc}")
+-		}
+-	}
+-}
+-
+-ClassNode loadClass(Path path) {
+-	def node = new ClassNode()
+-
+-	Files.newInputStream(path).withCloseable { is ->
+-		new ClassReader(is).accept(node, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES)
+-	}
+-
+-	return node
+-}
+-
+-def validateAccessWidener(List<String> lines) {
+-	List<String> exceptions = new ArrayList<>()
+-
+-	for (int i = 0; i < lines.size(); i++) {
+-		String line = lines.get(i)
+-		if (line.isBlank() || line.startsWith("#") || line.startsWith("transitive-") || line.startsWith("accessWidener")) continue
+-			exceptions.add(String.valueOf(i + 1))
+-	}
+-
+-	if (exceptions.size() > 0) {
+-		throw new InvalidUserDataException("\"fabric-transitive-access-wideners-v1.accesswidener\" contains non-transitive access modifiers at lines: [" + String.join(", ", exceptions) + "]")
+-	}
+-}
+-
+-generateResources.dependsOn generateAccessWidener
